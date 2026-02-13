@@ -111,6 +111,13 @@ export class P2PSyncSettingTab extends PluginSettingTab {
 
         if (this.plugin.settings.enableLocalServer) {
             new Setting(containerEl)
+                .setName('Server Name')
+                .setDesc('This is the name clients will see when they connect')
+                .addText(text => text
+                    .setValue(this.plugin.settings.deviceName)
+                    .setDisabled(true));
+
+            new Setting(containerEl)
                 .setName('Host Port')
                 .setDesc('Port for the local server')
                 .addText(text => text
