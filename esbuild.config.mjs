@@ -91,6 +91,22 @@ const context = await esbuild.context({
                     return { path: srcPath };
                 });
             },
+        },
+        {
+            name: 'deduplicate-yjs',
+            setup(build) {
+                // Force all imports of yjs, y-protocols, and lib0 to resolve to
+                // the same copy, preventing "Yjs was already imported" warnings
+                const yjsPath = require.resolve('yjs');
+                const yProtocolsSyncPath = require.resolve('y-protocols/sync');
+                const yProtocolsAwarenessPath = require.resolve('y-protocols/awareness');
+                const yProtocolsAuthPath = require.resolve('y-protocols/auth');
+
+                build.onResolve({ filter: /^yjs$/ }, () => ({ path: yjsPath }));
+                build.onResolve({ filter: /^y-protocols\/sync$/ }, () => ({ path: yProtocolsSyncPath }));
+                build.onResolve({ filter: /^y-protocols\/awareness$/ }, () => ({ path: yProtocolsAwarenessPath }));
+                build.onResolve({ filter: /^y-protocols\/auth$/ }, () => ({ path: yProtocolsAuthPath }));
+            },
         }
     ],
 });

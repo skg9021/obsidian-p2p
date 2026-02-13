@@ -91,10 +91,12 @@ export class YjsService {
         this.log(`Starting TrysteroProvider for room: ${roomName}`);
         try {
             this.trysteroProvider = new TrysteroProvider(
-                roomName,
+                `mqtt-${roomName}`,
                 this.ydoc,
                 {
                     awareness: this.awareness,
+                    filterBcConns: false,
+                    disableBc: true, // Disable BroadcastChannel — not useful in Obsidian/Electron
                     joinRoom: (config: any, roomId: string) => {
                         return joinRoom({
                             ...config,
@@ -140,13 +142,14 @@ export class YjsService {
         this.log(`Starting local WebrtcProvider: signaling=${signalingUrl}, room=${roomName}`);
         try {
             this.localWebrtcProvider = new WebrtcProvider(
-                roomName,
+                `lan-${roomName}`,
                 this.ydoc,
                 {
                     signaling: [signalingUrl],
                     password: password || null,
                     maxConns: 20,
                     awareness: this.awareness,
+                    filterBcConns: false,
                 }
             );
 
