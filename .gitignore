@@ -1,0 +1,12 @@
+# System files
+.DS_Store
+Thumbs.db
+node_modules/
+.idea/
+.vscode/
+
+# Build artifacts
+main.js
+manifest.json
+styles.css
+styles.css.map
