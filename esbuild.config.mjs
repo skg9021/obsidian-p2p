@@ -64,7 +64,21 @@ const context = await esbuild.context({
     sourcemap: prod ? false : "inline",
     treeShaking: true,
     outfile: "main.js",
-    plugins: [copyStylesPlugin],
+    plugins: [
+        copyStylesPlugin,
+        {
+            name: 'ws-node-resolution',
+            setup(build) {
+                // Force 'ws' to resolve to index.js instead of browser.js
+                // We mark it as NOT external so it gets bundled, but we must use the correct file.
+                // Since this runs in node environment for build, we can use require.resolve
+                const wsPath = require('path').resolve('node_modules/ws/index.js');
+                build.onResolve({ filter: /^ws$/ }, (args) => {
+                    return { path: wsPath };
+                });
+            },
+        }
+    ],
 });
 
 if (prod) {
