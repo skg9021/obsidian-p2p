@@ -31,17 +31,20 @@ export default class P2PSyncPlugin extends Plugin {
         await this.security.deriveKey(this.settings.secretKey);
         this.logger.log('Security service initialized');
 
-        // Initialize Yjs Service (manages Y.Doc + both P2P providers)
+        // Initialize Yjs Service (manages Y.Doc + both P2P providers + awareness)
         this.yjsService = new YjsService(this.app, this.settings);
+        this.yjsService.onPeersUpdated = (peers) => {
+            this.logger.log(`Awareness peers: [${peers.map(p => p.name).join(', ')}]`);
+            this.connectedClients = peers.map(p => p.name);
+            if (this.settingsTab) this.settingsTab.display();
+        };
         this.logger.log('Yjs service initialized');
 
         // Initialize Local Signaling Server Service
         this.localServerService = new LocalServerService(this.settings);
         this.localServerService.setCallbacks(
             (clients) => {
-                this.logger.log(`Connected peers: ${clients.length}`);
-                this.connectedClients = clients;
-                if (this.settingsTab) this.settingsTab.display();
+                this.logger.log(`Signaling server connections: [${clients.join(', ')}]`);
             },
         );
         this.logger.log('Local signaling server service initialized');

@@ -6,11 +6,18 @@ import { TrysteroProvider } from '@winstonfassett/y-webrtc-trystero';
 import { joinRoom } from 'trystero/mqtt';
 // @ts-ignore
 import { WebrtcProvider } from 'y-webrtc';
+import * as awarenessProtocol from 'y-protocols/awareness';
 import { P2PSettings } from '../settings';
+
+export interface PeerInfo {
+    name: string;
+    clientId: number;
+}
 
 export class YjsService {
     ydoc: Y.Doc;
     yMap: Y.Map<Y.Text>;
+    awareness: awarenessProtocol.Awareness;
     isRemoteUpdate: boolean = false;
 
     /** Internet P2P provider (Trystero + MQTT signaling) */
@@ -18,9 +25,25 @@ export class YjsService {
     /** Local LAN P2P provider (y-webrtc + WebSocket signaling) */
     localWebrtcProvider: any | null = null;
 
+    /** Callback when peer list changes */
+    onPeersUpdated: (peers: PeerInfo[]) => void = () => { };
+
     constructor(private app: App, private settings: P2PSettings) {
         this.ydoc = new Y.Doc();
         this.yMap = this.ydoc.getMap('obsidian-vault');
+
+        // Shared awareness instance — used by both providers
+        this.awareness = new awarenessProtocol.Awareness(this.ydoc);
+
+        // Set our own device name in awareness
+        this.awareness.setLocalState({
+            name: this.settings.deviceName,
+        });
+
+        // Listen for awareness changes to track peers
+        this.awareness.on('change', () => {
+            this.emitPeerList();
+        });
 
         this.ydoc.on('update', (update: Uint8Array, origin: any) => {
             if (origin !== 'local') {
@@ -31,6 +54,19 @@ export class YjsService {
 
     private log(msg: string, ...args: any[]) {
         if (this.settings.enableDebugLogs) console.log(`[P2P Yjs] ${msg}`, ...args);
+    }
+
+    /** Collect all peers from awareness and notify via callback */
+    private emitPeerList() {
+        const peers: PeerInfo[] = [];
+        this.awareness.getStates().forEach((state: any, clientId: number) => {
+            if (clientId === this.ydoc.clientID) return; // Skip self
+            if (state && state.name) {
+                peers.push({ name: state.name, clientId });
+            }
+        });
+        this.log(`Peers updated: [${peers.map(p => p.name).join(', ')}]`);
+        this.onPeersUpdated(peers);
     }
 
     // ─── Internet P2P (Trystero + MQTT) ─────────────────────────
@@ -48,6 +84,7 @@ export class YjsService {
                 roomName,
                 this.ydoc,
                 {
+                    awareness: this.awareness,
                     joinRoom: (config: any, roomId: string) => {
                         return joinRoom({
                             ...config,
@@ -99,6 +136,7 @@ export class YjsService {
                     signaling: [signalingUrl],
                     password: password || null,
                     maxConns: 20,
+                    awareness: this.awareness,
                 }
             );
 
@@ -129,6 +167,7 @@ export class YjsService {
     destroy() {
         this.stopTrysteroProvider();
         this.stopLocalWebrtcProvider();
+        this.awareness.destroy();
         this.ydoc.destroy();
     }
 

@@ -17,7 +17,7 @@ import { P2PSettings } from '../settings';
  */
 export class LocalServerService {
     private localWss: any | null = null;
-    private connectedClients: Set<any> = new Set();
+    private connectedClients: Map<any, string> = new Map();
 
     /** Map from topic name to set of subscribed WebSocket connections */
     private topics: Map<string, Set<any>> = new Map();
@@ -85,7 +85,7 @@ export class LocalServerService {
             this.localWss.on('connection', (ws: any, req: any) => {
                 const remoteAddr = req?.socket?.remoteAddress || 'unknown';
                 this.log(`Peer connected from ${remoteAddr}`);
-                this.connectedClients.add(ws);
+                this.connectedClients.set(ws, remoteAddr);
                 this.notifyClientsUpdated();
 
                 const subscribedTopics = new Set<string>();
@@ -217,8 +217,8 @@ export class LocalServerService {
     }
 
     private notifyClientsUpdated() {
-        const clients = Array.from(this.connectedClients).map(() => 'peer');
-        this.log(`Connected peers: ${this.connectedClients.size}`);
+        const clients = Array.from(this.connectedClients.values());
+        this.log(`Connected peers: ${clients.length} [${clients.join(', ')}]`);
         this.onClientsUpdated(clients);
     }
 }
