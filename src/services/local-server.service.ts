@@ -1,11 +1,7 @@
 import { Notice, Platform } from 'obsidian';
 import { P2PSettings } from '../settings';
 
-// Dynamic import for 'ws'
-let WebSocketServer: any;
-if (!Platform.isMobile) {
-    import('ws').then(m => { WebSocketServer = m.WebSocketServer; }).catch(() => { });
-}
+
 
 export class LocalServerService {
     localWss: any | null = null;
@@ -60,6 +56,19 @@ export class LocalServerService {
     }
 
     async startServer() {
+        if (Platform.isMobile) return;
+
+        let WebSocketServer: any;
+        try {
+            // eslint-disable-next-line @typescript-eslint/no-var-requires
+            const wsModule = require('ws');
+            WebSocketServer = wsModule.WebSocketServer;
+        } catch (e) {
+            this.log('Failed to load ws module', e);
+            new Notice("Failed to load WebSocket module: " + e.message);
+            return;
+        }
+
         if (!WebSocketServer) {
             this.log('WebSocketServer not available (mobile or failed import)');
             return;
