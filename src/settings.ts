@@ -86,7 +86,23 @@ export class P2PSyncSettingTab extends PluginSettingTab {
                 .setName('Enable Host Mode (Desktop Only)')
                 .setDesc('Allow this device to act as a local relay server for devices on the same WiFi.')
                 .addToggle(t => t.setValue(this.plugin.settings.enableLocalServer)
-                    .onChange(v => { this.plugin.settings.enableLocalServer = v; this.plugin.saveSettingsDebounced(); }));
+                    .onChange(v => {
+                        this.plugin.settings.enableLocalServer = v;
+                        this.plugin.saveSettingsDebounced();
+                        // Force refresh to show/hide IP
+                        this.display();
+                    }));
+
+            if (this.plugin.settings.enableLocalServer) {
+                const ipSetting = new Setting(containerEl)
+                    .setName('Server IP Addresses')
+                    .setDesc('Fetching...');
+
+                this.plugin.getLocalIPs().then(ips => {
+                    const ipText = ips.length > 0 ? ips.join(', ') : 'Unknown (Check Console)';
+                    ipSetting.setDesc(`Use this IP to connect other devices: ${ipText}`);
+                });
+            }
 
             new Setting(containerEl)
                 .setName('Host Port')
