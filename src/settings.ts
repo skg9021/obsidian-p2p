@@ -1,31 +1,24 @@
-import { App, PluginSettingTab, Setting, Platform, debounce } from 'obsidian';
+import { App, PluginSettingTab, Setting, Notice } from 'obsidian';
 import P2PSyncPlugin from './main';
 
 export interface P2PSettings {
     deviceName: string;
     secretKey: string;
-    discoveryServer: string; // MQTT Broker URL
-    iceServersJSON: string;  // STUN/TURN Config as JSON string
-
-    // Local Network
+    discoveryServer: string;
+    iceServersJSON: string;
     enableLocalServer: boolean;
     localServerPort: number;
     localServerAddress: string;
 }
 
-const DEFAULT_ICE_SERVERS = [
-    { urls: 'stun:stun.l.google.com:19302' },
-    { urls: 'stun:global.stun.twilio.com:3478' }
-];
-
 export const DEFAULT_SETTINGS: P2PSettings = {
-    deviceName: `Vault-${Math.floor(Math.random() * 1000)}`,
-    secretKey: 'generate-a-strong-password-here',
+    deviceName: 'Obsidian-Device-' + Math.floor(Math.random() * 1000),
+    secretKey: 'my-secret-key',
     discoveryServer: 'wss://test.mosquitto.org:8081',
-    iceServersJSON: JSON.stringify(DEFAULT_ICE_SERVERS, null, 2),
+    iceServersJSON: '[{"urls":"stun:stun.l.google.com:19302"}]',
     enableLocalServer: false,
     localServerPort: 8080,
-    localServerAddress: ''
+    localServerAddress: 'ws://localhost:8080'
 }
 
 export class P2PSyncSettingTab extends PluginSettingTab {
@@ -39,81 +32,116 @@ export class P2PSyncSettingTab extends PluginSettingTab {
     display(): void {
         const { containerEl } = this;
         containerEl.empty();
-        containerEl.createEl('h2', { text: 'P2P Sync Configuration' });
 
-        // --- Identity ---
+        containerEl.createEl('h2', { text: 'P2P Sync Settings' });
+
         new Setting(containerEl)
             .setName('Device Name')
-            .setDesc('How this device appears to peers.')
-            .addText(t => t.setValue(this.plugin.settings.deviceName)
-                .onChange(v => { this.plugin.settings.deviceName = v; this.plugin.saveSettingsDebounced(); }));
+            .setDesc('Unique name for this device in the P2P network')
+            .addText(text => text
+                .setPlaceholder('Enter device name')
+                .setValue(this.plugin.settings.deviceName)
+                .onChange(async (value) => {
+                    this.plugin.settings.deviceName = value;
+                    await this.plugin.saveSettingsDebounced();
+                }));
 
         new Setting(containerEl)
             .setName('Secret Key')
-            .setDesc('Encryption password. Must be IDENTICAL on all devices.')
-            .addText(t => t.setValue(this.plugin.settings.secretKey)
-                .onChange(v => { this.plugin.settings.secretKey = v; this.plugin.saveSettingsDebounced(); }));
+            .setDesc('Shared secret for encryption and discovery (Must be same on all devices)')
+            .addText(text => text
+                .setPlaceholder('Enter secret key')
+                .setValue(this.plugin.settings.secretKey)
+                .onChange(async (value) => {
+                    this.plugin.settings.secretKey = value;
+                    await this.plugin.saveSettingsDebounced();
+                }));
 
-        // --- Signaling (MQTT) ---
-        containerEl.createEl('h3', { text: 'Signaling Server (Discovery)' });
+        containerEl.createEl('h3', { text: 'Discovery & Signaling' });
+
         new Setting(containerEl)
-            .setName('MQTT Broker URL')
-            .setDesc('WebSocket URL for the MQTT broker (e.g., wss://test.mosquitto.org:8081).')
-            .addText(t => t.setValue(this.plugin.settings.discoveryServer)
-                .onChange(v => { this.plugin.settings.discoveryServer = v; this.plugin.saveSettingsDebounced(); }));
+            .setName('MQTT Discovery Server')
+            .setDesc('WebSocket URL for MQTT broker')
+            .addText(text => text
+                .setPlaceholder('wss://broker.hivemq.com:8000/mqtt')
+                .setValue(this.plugin.settings.discoveryServer)
+                .onChange(async (value) => {
+                    this.plugin.settings.discoveryServer = value;
+                    await this.plugin.saveSettingsDebounced();
+                }));
 
-        // --- NAT Traversal (STUN/TURN) ---
-        containerEl.createEl('h3', { text: 'Connection Helpers (STUN/TURN)' });
         new Setting(containerEl)
             .setName('ICE Servers (JSON)')
-            .setDesc('Advanced: Edit this to add paid TURN servers for restrictive networks. Must be valid JSON array.')
-            .addTextArea(t => {
-                t.setValue(this.plugin.settings.iceServersJSON)
-                t.inputEl.rows = 6;
-                t.inputEl.style.width = '100%';
-                t.inputEl.style.fontFamily = 'monospace';
-                t.onChange(v => {
-                    this.plugin.settings.iceServersJSON = v;
-                    this.plugin.saveSettingsDebounced();
-                });
-            });
+            .setDesc('STUN/TURN servers for WebRTC')
+            .addTextArea(text => text
+                .setPlaceholder('[{"urls":"stun:stun.l.google.com:19302"}]')
+                .setValue(this.plugin.settings.iceServersJSON)
+                .onChange(async (value) => {
+                    this.plugin.settings.iceServersJSON = value;
+                    await this.plugin.saveSettingsDebounced();
+                }));
 
-        // --- Local Network ---
-        containerEl.createEl('h3', { text: 'Local Network (Offline Mode)' });
-
-        if (!Platform.isMobile) {
-            new Setting(containerEl)
-                .setName('Enable Host Mode (Desktop Only)')
-                .setDesc('Allow this device to act as a local relay server for devices on the same WiFi.')
-                .addToggle(t => t.setValue(this.plugin.settings.enableLocalServer)
-                    .onChange(v => {
-                        this.plugin.settings.enableLocalServer = v;
-                        this.plugin.saveSettingsDebounced();
-                        // Force refresh to show/hide IP
-                        this.display();
-                    }));
-
-            if (this.plugin.settings.enableLocalServer) {
-                const ipSetting = new Setting(containerEl)
-                    .setName('Server IP Addresses')
-                    .setDesc('Fetching...');
-
-                this.plugin.getLocalIPs().then(ips => {
-                    const ipText = ips.length > 0 ? ips.join(', ') : 'Unknown (Check Console)';
-                    ipSetting.setDesc(`Use this IP to connect other devices: ${ipText}`);
-                });
-            }
-
-            new Setting(containerEl)
-                .setName('Host Port')
-                .addText(t => t.setValue(String(this.plugin.settings.localServerPort))
-                    .onChange(v => { this.plugin.settings.localServerPort = Number(v); this.plugin.saveSettingsDebounced(); }));
-        }
+        containerEl.createEl('h3', { text: 'Local Network (Host Mode)' });
 
         new Setting(containerEl)
-            .setName('Connect to Host')
-            .setDesc('Enter ws://<Desktop-IP>:<Port> (e.g., ws://192.168.1.5:8080)')
-            .addText(t => t.setValue(this.plugin.settings.localServerAddress)
-                .onChange(v => { this.plugin.settings.localServerAddress = v; this.plugin.saveSettingsDebounced(); }));
+            .setName('Enable Host Mode (Server)')
+            .setDesc('Start a local WebSocket server for other devices on the LAN')
+            .addToggle(toggle => toggle
+                .setValue(this.plugin.settings.enableLocalServer)
+                .onChange(async (value) => {
+                    this.plugin.settings.enableLocalServer = value;
+                    await this.plugin.saveSettingsDebounced();
+                    // Force refresh to show/hide IP
+                    this.display();
+                }));
+
+        if (this.plugin.settings.enableLocalServer) {
+            new Setting(containerEl)
+                .setName('Host Port')
+                .setDesc('Port for the local server')
+                .addText(text => text
+                    .setPlaceholder('8080')
+                    .setValue(String(this.plugin.settings.localServerPort))
+                    .onChange(async (value) => {
+                        this.plugin.settings.localServerPort = Number(value);
+                        await this.plugin.saveSettingsDebounced();
+                    }));
+
+            const ipSetting = new Setting(containerEl)
+                .setName('Server IP Addresses')
+                .setDesc('Fetching...');
+
+            // Assuming getLocalIPs is available on plugin via service or helper
+            // We kept the helper in main.ts
+            this.plugin.getLocalIPs().then(ips => {
+                const ipText = ips.length > 0 ? ips.join(', ') : 'Unknown (Check Console)';
+                ipSetting.setDesc(`Use this IP to connect other devices: ${ipText}`);
+            });
+
+            // Connected Clients List
+            const clientsDiv = containerEl.createEl('div', { cls: 'connected-clients-list' });
+            clientsDiv.createEl('h4', { text: 'Connected Clients' });
+            if (this.plugin.connectedClients.length === 0) {
+                clientsDiv.createEl('p', { text: 'No clients connected.' });
+            } else {
+                const ul = clientsDiv.createEl('ul');
+                this.plugin.connectedClients.forEach(client => {
+                    ul.createEl('li', { text: client });
+                });
+            }
+        }
+
+        containerEl.createEl('h3', { text: 'Local Client (Connect to Host)' });
+
+        new Setting(containerEl)
+            .setName('Host Address')
+            .setDesc('WebSocket address of the host (e.g., ws://192.168.1.5:8080)')
+            .addText(text => text
+                .setPlaceholder('ws://localhost:8080')
+                .setValue(this.plugin.settings.localServerAddress)
+                .onChange(async (value) => {
+                    this.plugin.settings.localServerAddress = value;
+                    await this.plugin.saveSettingsDebounced();
+                }));
     }
 }

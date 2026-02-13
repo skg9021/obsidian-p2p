@@ -5,12 +5,7 @@ import { P2PSettings, DEFAULT_SETTINGS, P2PSyncSettingTab } from './settings';
 import { MqttService } from './services/mqtt.service';
 import { WebrtcService, SignalMessage, SyncMessage, SyncType } from './services/webrtc.service';
 import { YjsService } from './services/yjs.service';
-
-// Dynamic import for 'ws' to avoid Mobile crashes
-let WebSocketServer: any;
-if (!Platform.isMobile) {
-    import('ws').then(m => { WebSocketServer = m.WebSocketServer; }).catch(() => { });
-}
+import { LocalServerService } from './services/local-server.service';
 
 export default class P2PSyncPlugin extends Plugin {
     settings: P2PSettings;
@@ -20,9 +15,10 @@ export default class P2PSyncPlugin extends Plugin {
     mqttService: MqttService;
     webrtcService: WebrtcService;
     yjsService: YjsService;
+    localServerService: LocalServerService;
 
-    localWss: any | null = null;
-    localWsClient: WebSocket | null = null;
+    connectedClients: string[] = [];
+    settingsTab: P2PSyncSettingTab;
 
     saveSettingsDebounced = debounce(this.saveSettings.bind(this), 1000, true);
 
@@ -55,8 +51,23 @@ export default class P2PSyncPlugin extends Plugin {
             () => this.yjsService.stateVector
         );
 
+        this.localServerService = new LocalServerService(this.settings);
+        this.localServerService.setCallbacks(
+            (msg) => this.handleSignalMessage(msg),
+            (clients) => {
+                this.connectedClients = clients;
+                if (this.settingsTab) this.settingsTab.display(); // Refresh UI
+            },
+            () => { // On Client Connect
+                this.sendSignal('HELLO', 'broadcast', {});
+            },
+            (msg) => this.security.decrypt(msg)
+        );
+
         // UI & Commands
-        this.addSettingTab(new P2PSyncSettingTab(this.app, this));
+        this.settingsTab = new P2PSyncSettingTab(this.app, this);
+        this.addSettingTab(this.settingsTab);
+
         this.statusBarItem = this.addStatusBarItem();
         this.statusBarItem.setText('P2P: Init');
 
@@ -95,20 +106,20 @@ export default class P2PSyncPlugin extends Plugin {
 
         try { await this.mqttService.connect(); } catch (e) { console.error('MQTT Init Failed', e); }
 
-        if (!Platform.isMobile && this.settings.enableLocalServer && WebSocketServer) {
-            await this.setupLocalServer();
+        if (!Platform.isMobile && this.settings.enableLocalServer) {
+            await this.localServerService.startServer();
         }
 
         if (this.settings.localServerAddress) {
-            this.setupLocalClient();
+            this.localServerService.connectToHost();
         }
     }
 
     disconnect() {
         this.mqttService.disconnect();
         this.webrtcService.destroy();
-        if (this.localWss) { this.localWss.close(); this.localWss = null; }
-        if (this.localWsClient) { this.localWsClient.close(); this.localWsClient = null; }
+        this.localServerService.stopServer();
+        this.localServerService.disconnectFromHost();
     }
 
     // --- Signaling ---
@@ -135,7 +146,7 @@ export default class P2PSyncPlugin extends Plugin {
             if (target === 'broadcast') {
                 const h = await this.security.hashString(this.settings.secretKey);
                 topic = `obsidian-p2p/v1/${h}/announce`;
-            } else if (target === 'announce') { // Handle 'announce' specifically if needed, logic above handles broadcast
+            } else if (target === 'announce') {
                 const h = await this.security.hashString(this.settings.secretKey);
                 topic = `obsidian-p2p/v1/${h}/announce`;
             } else if (!target.includes('/')) {
@@ -145,67 +156,7 @@ export default class P2PSyncPlugin extends Plugin {
             this.mqttService.publish(topic, encrypted);
         }
 
-        if (this.localWsClient?.readyState === WebSocket.OPEN) {
-            this.localWsClient.send(encrypted);
-        }
-
-        if (this.localWss) {
-            this.localWss.clients.forEach((c: any) => { if (c.readyState === 1) c.send(encrypted); });
-        }
-    }
-
-    // --- Local Server ---
-
-    async getLocalIPs() {
-        try {
-            const os = await import('os');
-            const nets = os.networkInterfaces();
-            const results: string[] = [];
-            for (const name of Object.keys(nets)) {
-                for (const net of nets[name] || []) {
-                    if (net.family === 'IPv4' && !net.internal) {
-                        results.push(net.address);
-                    }
-                }
-            }
-            return results;
-        } catch (e) {
-            console.error("Failed to get local IPs", e);
-            return [];
-        }
-    }
-
-    async setupLocalServer() {
-        try {
-            const ips = await this.getLocalIPs();
-            const ipDisplay = ips.length > 0 ? ips.join(', ') : 'localhost';
-
-            this.localWss = new WebSocketServer({ port: this.settings.localServerPort });
-            new Notice(`Host Mode: ws://${ipDisplay}:${this.settings.localServerPort}`);
-            console.log(`P2P Host Mode Active on: ${ips.map(ip => `ws://${ip}:${this.settings.localServerPort}`).join(', ')}`);
-
-            this.localWss.on('connection', (ws: any) => {
-                ws.on('message', async (data: any) => {
-                    this.localWss.clients.forEach((c: any) => {
-                        if (c !== ws && c.readyState === 1) c.send(data.toString());
-                    });
-                    this.handleSignalMessage(data.toString());
-                });
-            });
-        } catch (e) { console.error("Local Server Start Failed", e); }
-    }
-
-    setupLocalClient() {
-        try {
-            this.localWsClient = new WebSocket(this.settings.localServerAddress);
-            this.localWsClient.onopen = () => {
-                new Notice("Connected to Local Relay");
-                this.sendSignal('HELLO', 'broadcast', {});
-            };
-            this.localWsClient.onmessage = async (ev) => {
-                this.handleSignalMessage(ev.data.toString());
-            };
-        } catch (e) { console.error("Local Client Failed", e); }
+        this.localServerService.broadcast(encrypted);
     }
 
     // --- Sync Handling ---
@@ -246,5 +197,10 @@ export default class P2PSyncPlugin extends Plugin {
         const bytes = new Uint8Array(len);
         for (let i = 0; i < len; i++) bytes[i] = binary_string.charCodeAt(i);
         return bytes.buffer;
+    }
+
+    // Helper needed for Settings Tab now that getLocalIPs is in service
+    async getLocalIPs() {
+        return this.localServerService.getLocalIPs();
     }
 }
