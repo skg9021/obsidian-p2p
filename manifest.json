@@ -1,0 +1,10 @@
+{
+    "id": "obsidian-plugin-p2p",
+    "name": "Obsidian Plugin P2P",
+    "version": "1.0.0",
+    "minAppVersion": "0.15.0",
+    "description": "This is a sample plugin for Obsidian",
+    "author": "Your Name",
+    "authorUrl": "https://github.com/yourname/obsidian-plugin-p2p",
+    "isDesktopOnly": false
+}

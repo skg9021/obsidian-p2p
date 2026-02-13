@@ -7,6 +7,6 @@ node_modules/
 
 # Build artifacts
 main.js
-manifest.json
+
 styles.css
 styles.css.map
