@@ -39,8 +39,8 @@ describe('MqttService', () => {
         const connectCallback = mockClient.on.mock.calls.find((call: any) => call[0] === 'connect')[1];
         connectCallback();
 
-        expect(mockClient.subscribe).toHaveBeenCalledWith(expect.stringContaining('announce'));
-        expect(mockClient.subscribe).toHaveBeenCalledWith(expect.stringContaining('signal/TestDevice'));
+        expect(mockClient.subscribe).toHaveBeenCalledWith(expect.stringContaining('announce'), expect.any(Function));
+        expect(mockClient.subscribe).toHaveBeenCalledWith(expect.stringContaining('signal/TestDevice'), expect.any(Function));
     });
 
     it('should handle incoming messages', async () => {

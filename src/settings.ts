@@ -9,6 +9,7 @@ export interface P2PSettings {
     enableLocalServer: boolean;
     localServerPort: number;
     localServerAddress: string;
+    enableDebugLogs: boolean;
 }
 
 export const DEFAULT_SETTINGS: P2PSettings = {
@@ -18,7 +19,8 @@ export const DEFAULT_SETTINGS: P2PSettings = {
     iceServersJSON: '[{"urls":"stun:stun.l.google.com:19302"}]',
     enableLocalServer: false,
     localServerPort: 8080,
-    localServerAddress: 'ws://localhost:8080'
+    localServerAddress: 'ws://localhost:8080',
+    enableDebugLogs: false
 }
 
 export class P2PSyncSettingTab extends PluginSettingTab {
@@ -142,6 +144,41 @@ export class P2PSyncSettingTab extends PluginSettingTab {
                 .onChange(async (value) => {
                     this.plugin.settings.localServerAddress = value;
                     await this.plugin.saveSettingsDebounced();
+                }));
+
+        containerEl.createEl('h3', { text: 'Debug & Advanced' });
+
+        new Setting(containerEl)
+            .setName('Enable Debug Logs')
+            .setDesc('Log verbose status messages to the developer console')
+            .addToggle(toggle => toggle
+                .setValue(this.plugin.settings.enableDebugLogs)
+                .onChange(async (value) => {
+                    this.plugin.settings.enableDebugLogs = value;
+                    await this.plugin.saveSettingsDebounced();
+                }));
+
+        if (this.plugin.settings.enableLocalServer) {
+            new Setting(containerEl)
+                .setName('Manage Local Server')
+                .setDesc('Control the local WebSocket server')
+                .addButton(button => button
+                    .setButtonText('Restart Server')
+                    .setCta()
+                    .onClick(() => {
+                        this.plugin.restartLocalServer();
+                        new Notice('Local Server Restarted');
+                    }));
+        }
+
+        new Setting(containerEl)
+            .setName('Troubleshooting')
+            .setDesc('Manually attempt to find and connect to servers/peers')
+            .addButton(button => button
+                .setButtonText('Find Server / Reconnect')
+                .onClick(() => {
+                    this.plugin.connect();
+                    new Notice('Reconnecting...');
                 }));
     }
 }
