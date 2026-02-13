@@ -10,6 +10,7 @@ export interface P2PSettings {
     localServerPort: number;
     localServerAddress: string;
     enableDebugLogs: boolean;
+    enableMqttDiscovery: boolean;
 }
 
 export const DEFAULT_SETTINGS: P2PSettings = {
@@ -20,7 +21,8 @@ export const DEFAULT_SETTINGS: P2PSettings = {
     enableLocalServer: false,
     localServerPort: 8080,
     localServerAddress: 'ws://localhost:8080',
-    enableDebugLogs: false
+    enableDebugLogs: false,
+    enableMqttDiscovery: false
 }
 
 export class P2PSyncSettingTab extends PluginSettingTab {
@@ -60,6 +62,16 @@ export class P2PSyncSettingTab extends PluginSettingTab {
                 }));
 
         containerEl.createEl('h3', { text: 'Discovery & Signaling' });
+
+        new Setting(containerEl)
+            .setName('Enable MQTT Discovery')
+            .setDesc('Connect to a public MQTT broker for discovery over the internet')
+            .addToggle(toggle => toggle
+                .setValue(this.plugin.settings.enableMqttDiscovery)
+                .onChange(async (value) => {
+                    this.plugin.settings.enableMqttDiscovery = value;
+                    await this.plugin.saveSettingsDebounced();
+                }));
 
         new Setting(containerEl)
             .setName('MQTT Discovery Server')

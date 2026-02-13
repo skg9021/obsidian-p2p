@@ -139,12 +139,16 @@ export default class P2PSyncPlugin extends Plugin {
         this.disconnect();
         this.statusBarItem.setText('P2P: Connecting...');
 
-        this.logger.log('Attempting MQTT connection...');
-        try {
-            await this.mqttService.connect();
-            this.logger.log('MQTT connection initiated');
-        } catch (e) {
-            this.logger.error('MQTT Init Failed', e);
+        if (this.settings.enableMqttDiscovery) {
+            this.logger.log('Attempting MQTT connection...');
+            try {
+                await this.mqttService.connect();
+                this.logger.log('MQTT connection initiated');
+            } catch (e) {
+                this.logger.error('MQTT Init Failed', e);
+            }
+        } else {
+            this.logger.log('MQTT Discovery disabled in settings');
         }
 
         if (!Platform.isMobile && this.settings.enableLocalServer) {
