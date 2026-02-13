@@ -11,6 +11,7 @@ import { P2PSettings } from '../settings';
 
 export interface PeerInfo {
     name: string;
+    ip?: string;
     clientId: number;
 }
 
@@ -56,13 +57,22 @@ export class YjsService {
         if (this.settings.enableDebugLogs) console.log(`[P2P Yjs] ${msg}`, ...args);
     }
 
+    /** Set local IPs in awareness so other peers can see our IP */
+    setLocalIPs(ips: string[]) {
+        const currentState = this.awareness.getLocalState() || {};
+        this.awareness.setLocalState({
+            ...currentState,
+            ip: ips.length > 0 ? ips[0] : undefined,
+        });
+    }
+
     /** Collect all peers from awareness and notify via callback */
     private emitPeerList() {
         const peers: PeerInfo[] = [];
         this.awareness.getStates().forEach((state: any, clientId: number) => {
             if (clientId === this.ydoc.clientID) return; // Skip self
             if (state && state.name) {
-                peers.push({ name: state.name, clientId });
+                peers.push({ name: state.name, ip: state.ip, clientId });
             }
         });
         this.log(`Peers updated: [${peers.map(p => p.name).join(', ')}]`);

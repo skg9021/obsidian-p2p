@@ -138,18 +138,18 @@ export class P2PSyncSettingTab extends PluginSettingTab {
                 const ipText = ips.length > 0 ? ips.join(', ') : 'Unknown (Check Console)';
                 ipSetting.setDesc(`Use this IP to connect other devices: ${ipText}`);
             });
+        }
 
-            // Connected Clients List
-            const clientsDiv = containerEl.createEl('div', { cls: 'connected-clients-list' });
-            clientsDiv.createEl('h4', { text: 'Connected Clients' });
-            if (this.plugin.connectedClients.length === 0) {
-                clientsDiv.createEl('p', { text: 'No clients connected.' });
-            } else {
-                const ul = clientsDiv.createEl('ul');
-                this.plugin.connectedClients.forEach(client => {
-                    ul.createEl('li', { text: client });
-                });
-            }
+        // Connected Peers List (visible to both host and client via awareness)
+        containerEl.createEl('h3', { text: 'Connected Peers' });
+        const clientsDiv = containerEl.createEl('div', { cls: 'connected-clients-list' });
+        if (this.plugin.connectedClients.length === 0) {
+            clientsDiv.createEl('p', { text: 'No peers connected.' });
+        } else {
+            const ul = clientsDiv.createEl('ul');
+            this.plugin.connectedClients.forEach(client => {
+                ul.createEl('li', { text: client });
+            });
         }
 
         containerEl.createEl('h3', { text: 'Local Client (Connect to Host)' });
