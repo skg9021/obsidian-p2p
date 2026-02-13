@@ -8,5 +8,5 @@ node_modules/
 # Build artifacts
 main.js
 
-styles.css
+/styles.css
 styles.css.map
