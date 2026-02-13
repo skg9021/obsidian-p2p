@@ -1,9 +1,6 @@
-import { Plugin, App, TFile, Notice, TAbstractFile, Platform, normalizePath, debounce } from 'obsidian';
-import * as mqtt from 'mqtt';
+import { Plugin, App, TFile, Notice, TAbstractFile, Platform, debounce } from 'obsidian';
 import { SecurityService } from './security';
 import { P2PSettings, DEFAULT_SETTINGS, P2PSyncSettingTab } from './settings';
-import { MqttService } from './services/mqtt.service';
-import { WebrtcService, SignalMessage, SyncMessage, SyncType } from './services/webrtc.service';
 import { YjsService } from './services/yjs.service';
 import { LocalServerService } from './services/local-server.service';
 import { Logger } from './services/logger.service';
@@ -14,8 +11,6 @@ export default class P2PSyncPlugin extends Plugin {
     statusBarItem: HTMLElement;
     logger: Logger;
 
-    mqttService: MqttService;
-    webrtcService: WebrtcService;
     yjsService: YjsService;
     localServerService: LocalServerService;
 
@@ -36,60 +31,20 @@ export default class P2PSyncPlugin extends Plugin {
         await this.security.deriveKey(this.settings.secretKey);
         this.logger.log('Security service initialized');
 
-        // Initialize Services
-        this.yjsService = new YjsService(this.app);
-        this.yjsService.setUpdateCallback((update: Uint8Array) => {
-            this.logger.log('Yjs update detected, broadcasting to peers');
-            this.webrtcService.broadcastSyncMessage('YJS_UPDATE', update);
-        });
+        // Initialize Yjs Service (manages Y.Doc + both P2P providers)
+        this.yjsService = new YjsService(this.app, this.settings);
         this.logger.log('Yjs service initialized');
 
-        this.mqttService = new MqttService(this.settings, () => this.security.hashString(this.settings.secretKey));
-        this.mqttService.setCallbacks(
-            (msg) => {
-                this.logger.log('MQTT message received');
-                this.handleSignalMessage(msg);
-            },
-            () => {
-                this.logger.log('MQTT connected, sending HELLO');
-                this.statusBarItem.setText('P2P: Online');
-                this.sendSignal('HELLO', 'announce', { supported: true });
-            }
-        );
-        this.logger.log('MQTT service initialized');
-
-        this.webrtcService = new WebrtcService(this.settings);
-        this.webrtcService.setCallbacks(
-            (msg) => {
-                this.logger.log(`Sync message received: ${msg.type}`);
-                this.handleSyncMessage(msg);
-            },
-            (type, target, payload) => {
-                this.logger.log(`WebRTC signal: ${type} -> ${target}`);
-                return this.sendSignal(type, target, payload);
-            },
-            () => this.yjsService.stateVector
-        );
-        this.logger.log('WebRTC service initialized');
-
+        // Initialize Local Signaling Server Service
         this.localServerService = new LocalServerService(this.settings);
         this.localServerService.setCallbacks(
-            (msg) => {
-                this.logger.log('Local server/client message received');
-                this.handleSignalMessage(msg);
-            },
             (clients) => {
-                this.logger.log(`Connected clients updated: [${clients.join(', ')}]`);
+                this.logger.log(`Connected peers: ${clients.length}`);
                 this.connectedClients = clients;
                 if (this.settingsTab) this.settingsTab.display();
             },
-            () => {
-                this.logger.log('Client connected to host, sending HELLO');
-                this.sendSignal('HELLO', 'broadcast', {});
-            },
-            (msg) => this.security.decrypt(msg)
         );
-        this.logger.log('Local server service initialized');
+        this.logger.log('Local signaling server service initialized');
 
         // UI & Commands
         this.settingsTab = new P2PSyncSettingTab(this.app, this);
@@ -118,7 +73,6 @@ export default class P2PSyncPlugin extends Plugin {
         this.logger.log('Plugin unloading...');
         this.disconnect();
         this.yjsService.destroy();
-        this.webrtcService.destroy();
         this.logger.log('Plugin unloaded');
     }
 
@@ -139,123 +93,72 @@ export default class P2PSyncPlugin extends Plugin {
         this.disconnect();
         this.statusBarItem.setText('P2P: Connecting...');
 
+        // Derive a room name from the secret key
+        const roomHash = await this.security.hashString(this.settings.secretKey);
+        const roomName = `obsidian-p2p-${roomHash.substring(0, 16)}`;
+
+        // ─── Internet P2P (Trystero + MQTT signaling) ───────────
         if (this.settings.enableMqttDiscovery) {
-            this.logger.log('Attempting MQTT connection...');
+            this.logger.log('Starting Trystero provider (MQTT signaling)...');
             try {
-                await this.mqttService.connect();
-                this.logger.log('MQTT connection initiated');
+                this.yjsService.startTrysteroProvider(roomName, this.settings.secretKey);
+                this.statusBarItem.setText('P2P: Online');
+                this.logger.log(`Trystero provider started for room: ${roomName}`);
             } catch (e) {
-                this.logger.error('MQTT Init Failed', e);
+                this.logger.error('Trystero Init Failed', e);
             }
         } else {
-            this.logger.log('MQTT Discovery disabled in settings');
+            this.logger.log('MQTT Discovery disabled');
         }
 
+        // ─── Local LAN: Start signaling server (Host Mode) ─────
         if (!Platform.isMobile && this.settings.enableLocalServer) {
-            this.logger.log(`Starting local server on port ${this.settings.localServerPort}...`);
+            this.logger.log(`Starting local signaling server on port ${this.settings.localServerPort}...`);
             await this.localServerService.startServer();
-            this.logger.log('Local server started');
-        } else {
-            this.logger.log(`Local server skipped (isMobile=${Platform.isMobile}, enabled=${this.settings.enableLocalServer})`);
+
+            // Also connect as a local peer via our own signaling server
+            const localSignalingUrl = `ws://localhost:${this.settings.localServerPort}`;
+            this.yjsService.startLocalWebrtcProvider(localSignalingUrl, roomName, this.settings.secretKey);
+            this.logger.log('Host: signaling server + local WebRTC provider started');
         }
 
-        if (this.settings.localServerAddress) {
-            this.logger.log(`Connecting to host at ${this.settings.localServerAddress}...`);
-            this.localServerService.connectToHost();
-        } else {
-            this.logger.log('No host address configured, skipping client connection');
+        // ─── Local LAN: Connect to remote host's signaling server ─
+        if (this.settings.localServerAddress && !this.settings.enableLocalServer) {
+            this.logger.log(`Connecting to remote signaling server at ${this.settings.localServerAddress}...`);
+            this.yjsService.startLocalWebrtcProvider(
+                this.settings.localServerAddress,
+                roomName,
+                this.settings.secretKey
+            );
+            this.logger.log('Client: local WebRTC provider started');
         }
+
+        this.statusBarItem.setText('P2P: Connected');
         this.logger.log('--- connect() complete ---');
     }
 
     disconnect() {
         this.logger.log('--- disconnect() called ---');
-        this.mqttService.disconnect();
-        this.webrtcService.destroy();
+        this.yjsService.stopTrysteroProvider();
+        this.yjsService.stopLocalWebrtcProvider();
         this.localServerService.stopServer();
-        this.localServerService.disconnectFromHost();
         this.logger.log('All services disconnected');
     }
 
     async restartLocalServer() {
         this.logger.log('--- restartLocalServer() called ---');
         this.localServerService.stopServer();
-        this.logger.log('Local server stopped');
+        this.yjsService.stopLocalWebrtcProvider();
         if (!Platform.isMobile && this.settings.enableLocalServer) {
-            this.logger.log(`Restarting local server on port ${this.settings.localServerPort}...`);
+            this.logger.log(`Restarting signaling server on port ${this.settings.localServerPort}...`);
             await this.localServerService.startServer();
-            this.logger.log('Local server restarted');
+
+            const roomHash = await this.security.hashString(this.settings.secretKey);
+            const roomName = `obsidian-p2p-${roomHash.substring(0, 16)}`;
+            const localSignalingUrl = `ws://localhost:${this.settings.localServerPort}`;
+            this.yjsService.startLocalWebrtcProvider(localSignalingUrl, roomName, this.settings.secretKey);
+            this.logger.log('Signaling server and local provider restarted');
         }
-    }
-
-    // --- Signaling ---
-
-    async handleSignalMessage(rawMsg: string) {
-        try {
-            const decrypted = await this.security.decrypt(rawMsg);
-            if (decrypted) {
-                this.logger.log(`Signal received: type=${decrypted.type}, sender=${decrypted.sender}`);
-                this.webrtcService.handleSignal(decrypted);
-            }
-        } catch (e) {
-            this.logger.log('Failed to decrypt signal message (may be from self)');
-        }
-    }
-
-    async sendSignal(type: any, target: string, payload: any) {
-        this.logger.log(`Sending signal: type=${type}, target=${target}`);
-        const msg: SignalMessage = {
-            type,
-            sender: this.settings.deviceName,
-            target: target === 'broadcast' || target.includes('announce') ? undefined : target,
-            payload
-        };
-
-        const encrypted = await this.security.encrypt(msg);
-
-        if (this.mqttService.connected) {
-            let topic = target;
-            if (target === 'broadcast') {
-                const h = await this.security.hashString(this.settings.secretKey);
-                topic = `obsidian-p2p/v1/${h}/announce`;
-            } else if (target === 'announce') {
-                const h = await this.security.hashString(this.settings.secretKey);
-                topic = `obsidian-p2p/v1/${h}/announce`;
-            } else if (!target.includes('/')) {
-                const h = await this.security.hashString(this.settings.secretKey);
-                topic = `obsidian-p2p/v1/${h}/signal/${target}`;
-            }
-            this.logger.log(`Publishing to MQTT topic: ${topic}`);
-            this.mqttService.publish(topic, encrypted);
-        } else {
-            this.logger.log('MQTT not connected, skipping MQTT publish');
-        }
-
-        this.localServerService.broadcast(encrypted);
-        this.logger.log('Signal broadcast to local server/client');
-    }
-
-    // --- Sync Handling ---
-
-    handleSyncMessage(msg: SyncMessage) {
-        this.logger.log(`Processing sync message: ${msg.type}`);
-        const data = this.base64ToArrayBuffer(msg.data);
-        const uint8 = new Uint8Array(data);
-
-        this.yjsService.ydoc.transact(() => {
-            switch (msg.type) {
-                case 'YJS_SYNC_STEP_1':
-                    this.logger.log('Responding to YJS_SYNC_STEP_1 with state update');
-                    const update = this.yjsService.encodeStateAsUpdate(uint8);
-                    this.webrtcService.broadcastSyncMessage('YJS_SYNC_STEP_2', update);
-                    break;
-                case 'YJS_SYNC_STEP_2':
-                case 'YJS_UPDATE':
-                    this.logger.log(`Applying remote Yjs update (${msg.type})`);
-                    this.yjsService.applyUpdate(uint8);
-                    break;
-            }
-        }, 'remote');
     }
 
     async loadSettings() {
@@ -268,14 +171,6 @@ export default class P2PSyncPlugin extends Plugin {
             await this.security.deriveKey(this.settings.secretKey);
         }
         this.connect();
-    }
-
-    private base64ToArrayBuffer(base64: string): ArrayBuffer {
-        const binary_string = atob(base64);
-        const len = binary_string.length;
-        const bytes = new Uint8Array(len);
-        for (let i = 0; i < len; i++) bytes[i] = binary_string.charCodeAt(i);
-        return bytes.buffer;
     }
 
     async getLocalIPs() {

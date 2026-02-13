@@ -62,7 +62,7 @@ const context = await esbuild.context({
         "@codemirror/view",
         ...builtins],
     format: "cjs",
-    target: "es2018",
+    target: "es2020",
     logLevel: "info",
     sourcemap: prod ? false : "inline",
     treeShaking: true,
@@ -78,6 +78,17 @@ const context = await esbuild.context({
                 const wsPath = require('path').resolve('node_modules/ws/index.js');
                 build.onResolve({ filter: /^ws$/ }, (args) => {
                     return { path: wsPath };
+                });
+            },
+        },
+        {
+            name: 'y-webrtc-trystero-resolution',
+            setup(build) {
+                // The git install of @winstonfassett/y-webrtc-trystero has no dist/ dir,
+                // so resolve to the source file directly
+                const srcPath = require('path').resolve('node_modules/@winstonfassett/y-webrtc-trystero/src/y-webrtc-trystero.js');
+                build.onResolve({ filter: /^@winstonfassett\/y-webrtc-trystero$/ }, () => {
+                    return { path: srcPath };
                 });
             },
         }

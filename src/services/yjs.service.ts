@@ -1,31 +1,138 @@
 import * as Y from 'yjs';
 import { App, TFile, TAbstractFile, debounce } from 'obsidian';
+// @ts-ignore - no types for this package
+import { TrysteroProvider } from '@winstonfassett/y-webrtc-trystero';
+// @ts-ignore
+import { joinRoom } from 'trystero/mqtt';
+// @ts-ignore
+import { WebrtcProvider } from 'y-webrtc';
+import { P2PSettings } from '../settings';
 
 export class YjsService {
     ydoc: Y.Doc;
     yMap: Y.Map<Y.Text>;
     isRemoteUpdate: boolean = false;
-    private onUpdateCallback: (update: Uint8Array) => void = () => { };
 
-    constructor(private app: App) {
+    /** Internet P2P provider (Trystero + MQTT signaling) */
+    trysteroProvider: any | null = null;
+    /** Local LAN P2P provider (y-webrtc + WebSocket signaling) */
+    localWebrtcProvider: any | null = null;
+
+    constructor(private app: App, private settings: P2PSettings) {
         this.ydoc = new Y.Doc();
         this.yMap = this.ydoc.getMap('obsidian-vault');
 
-        this.ydoc.on('update', (update, origin) => {
+        this.ydoc.on('update', (update: Uint8Array, origin: any) => {
             if (origin !== 'local') {
                 this.applyToDisk();
-                this.onUpdateCallback(update);
             }
         });
     }
 
-    setUpdateCallback(callback: (update: Uint8Array) => void) {
-        this.onUpdateCallback = callback;
+    private log(msg: string, ...args: any[]) {
+        if (this.settings.enableDebugLogs) console.log(`[P2P Yjs] ${msg}`, ...args);
     }
 
+    // ─── Internet P2P (Trystero + MQTT) ─────────────────────────
+
+    startTrysteroProvider(roomName: string, password?: string) {
+        if (this.trysteroProvider) {
+            this.log('Destroying existing Trystero provider');
+            this.trysteroProvider.destroy();
+            this.trysteroProvider = null;
+        }
+
+        this.log(`Starting TrysteroProvider for room: ${roomName}`);
+        try {
+            this.trysteroProvider = new TrysteroProvider(
+                roomName,
+                this.ydoc,
+                {
+                    joinRoom: (config: any, roomId: string) => {
+                        return joinRoom({
+                            ...config,
+                            appId: config.appId || 'obsidian-p2p-sync',
+                            password: password || undefined,
+                        }, roomId);
+                    },
+                    password: password || undefined,
+                }
+            );
+
+            this.trysteroProvider.on('synced', (event: any) => {
+                this.log(`Trystero synced: ${JSON.stringify(event)}`);
+            });
+
+            this.trysteroProvider.on('peers', (event: any) => {
+                this.log(`Trystero peers: added=${event.added}, removed=${event.removed}`);
+            });
+
+            this.log('TrysteroProvider started');
+        } catch (e) {
+            console.error('[P2P Yjs] Failed to start TrysteroProvider', e);
+        }
+    }
+
+    stopTrysteroProvider() {
+        if (this.trysteroProvider) {
+            this.log('Stopping TrysteroProvider');
+            this.trysteroProvider.destroy();
+            this.trysteroProvider = null;
+        }
+    }
+
+    // ─── Local LAN P2P (y-webrtc + WebSocket signaling) ─────────
+
+    startLocalWebrtcProvider(signalingUrl: string, roomName: string, password?: string) {
+        if (this.localWebrtcProvider) {
+            this.log('Destroying existing local WebRTC provider');
+            this.localWebrtcProvider.destroy();
+            this.localWebrtcProvider = null;
+        }
+
+        this.log(`Starting local WebrtcProvider: signaling=${signalingUrl}, room=${roomName}`);
+        try {
+            this.localWebrtcProvider = new WebrtcProvider(
+                roomName,
+                this.ydoc,
+                {
+                    signaling: [signalingUrl],
+                    password: password || null,
+                    maxConns: 20,
+                }
+            );
+
+            this.localWebrtcProvider.on('synced', (event: any) => {
+                this.log(`Local WebRTC synced: ${JSON.stringify(event)}`);
+            });
+
+            this.localWebrtcProvider.on('peers', (event: any) => {
+                this.log(`Local WebRTC peers changed`);
+            });
+
+            this.log('Local WebrtcProvider started');
+        } catch (e) {
+            console.error('[P2P Yjs] Failed to start local WebrtcProvider', e);
+        }
+    }
+
+    stopLocalWebrtcProvider() {
+        if (this.localWebrtcProvider) {
+            this.log('Stopping local WebrtcProvider');
+            this.localWebrtcProvider.destroy();
+            this.localWebrtcProvider = null;
+        }
+    }
+
+    // ─── Lifecycle ──────────────────────────────────────────────
+
     destroy() {
+        this.stopTrysteroProvider();
+        this.stopLocalWebrtcProvider();
         this.ydoc.destroy();
     }
+
+    // ─── Vault ↔ Yjs sync ───────────────────────────────────────
 
     async handleLocalModify(file: TAbstractFile) {
         if (this.isRemoteUpdate) return;
@@ -43,9 +150,6 @@ export class YjsService {
                 yText.insert(0, content);
             }
         }, 'local');
-
-        const update = Y.encodeStateAsUpdate(this.ydoc);
-        this.onUpdateCallback(update);
     }
 
     applyToDisk = debounce(async () => {
@@ -86,17 +190,5 @@ export class YjsService {
             current = current ? `${current}/${part}` : part;
             if (!this.app.vault.getAbstractFileByPath(current)) await this.app.vault.createFolder(current);
         }
-    }
-
-    applyUpdate(uint8: Uint8Array) {
-        Y.applyUpdate(this.ydoc, uint8, 'remote');
-    }
-
-    get stateVector() {
-        return Y.encodeStateVector(this.ydoc);
-    }
-
-    encodeStateAsUpdate(targetStateVector?: Uint8Array) {
-        return Y.encodeStateAsUpdate(this.ydoc, targetStateVector);
     }
 }
