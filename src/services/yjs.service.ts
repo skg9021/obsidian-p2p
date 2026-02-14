@@ -79,6 +79,11 @@ export class YjsService {
         this.onPeersUpdated(peers);
     }
 
+    /** Public method to re-emit the current peer list (e.g. after reconnect) */
+    refreshPeerList() {
+        this.emitPeerList();
+    }
+
     // ─── Internet P2P (Trystero + MQTT) ─────────────────────────
 
     startTrysteroProvider(roomName: string, password?: string) {

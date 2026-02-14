@@ -8,6 +8,7 @@ export interface P2PSettings {
     iceServersJSON: string;
     enableLocalServer: boolean;
     localServerPort: number;
+    enableLocalClient: boolean;
     localServerAddress: string;
     enableDebugLogs: boolean;
     enableMqttDiscovery: boolean;
@@ -20,6 +21,7 @@ export const DEFAULT_SETTINGS: P2PSettings = {
     iceServersJSON: '[{"urls":"stun:stun.l.google.com:19302"}]',
     enableLocalServer: false,
     localServerPort: 8080,
+    enableLocalClient: false,
     localServerAddress: 'ws://localhost:8080',
     enableDebugLogs: false,
     enableMqttDiscovery: false
@@ -155,15 +157,28 @@ export class P2PSyncSettingTab extends PluginSettingTab {
         containerEl.createEl('h3', { text: 'Local Client (Connect to Host)' });
 
         new Setting(containerEl)
-            .setName('Host Address')
-            .setDesc('WebSocket address of the host (e.g., ws://192.168.1.5:8080)')
-            .addText(text => text
-                .setPlaceholder('ws://localhost:8080')
-                .setValue(this.plugin.settings.localServerAddress)
+            .setName('Enable Local Client')
+            .setDesc('Connect to a host on the local network for P2P sync')
+            .addToggle(toggle => toggle
+                .setValue(this.plugin.settings.enableLocalClient)
                 .onChange(async (value) => {
-                    this.plugin.settings.localServerAddress = value;
+                    this.plugin.settings.enableLocalClient = value;
                     await this.plugin.saveSettingsDebounced();
+                    this.display();
                 }));
+
+        if (this.plugin.settings.enableLocalClient) {
+            new Setting(containerEl)
+                .setName('Host Address')
+                .setDesc('WebSocket address of the host (e.g., ws://192.168.1.5:8080)')
+                .addText(text => text
+                    .setPlaceholder('ws://localhost:8080')
+                    .setValue(this.plugin.settings.localServerAddress)
+                    .onChange(async (value) => {
+                        this.plugin.settings.localServerAddress = value;
+                        await this.plugin.saveSettingsDebounced();
+                    }));
+        }
 
         containerEl.createEl('h3', { text: 'Debug & Advanced' });
 

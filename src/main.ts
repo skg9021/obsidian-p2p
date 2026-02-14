@@ -130,7 +130,7 @@ export default class P2PSyncPlugin extends Plugin {
         }
 
         // ─── Local LAN: Connect to remote host's signaling server ─
-        if (this.settings.localServerAddress && !this.settings.enableLocalServer) {
+        if (this.settings.enableLocalClient && this.settings.localServerAddress) {
             this.logger.log(`Connecting to remote signaling server at ${this.settings.localServerAddress}...`);
             this.yjsService.startLocalWebrtcProvider(
                 this.settings.localServerAddress,
@@ -141,6 +141,9 @@ export default class P2PSyncPlugin extends Plugin {
         }
 
         this.statusBarItem.setText('P2P: Connected');
+        // Re-emit peer list after reconnect (awareness 'change' only fires on
+        // actual state changes, so if the same peers reconnect the list wouldn't update)
+        this.yjsService.refreshPeerList();
         this.logger.log('--- connect() complete ---');
     }
 
