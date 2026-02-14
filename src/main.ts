@@ -123,6 +123,7 @@ export default class P2PSyncPlugin extends Plugin {
         }
 
         // ─── Local LAN: Start signaling server (Host Mode) ─────
+        // Mobile apps cannot host a WebSocket server (requires Node.js 'ws' module and open ports)
         if (!Platform.isMobile && this.settings.enableLocalServer) {
             this.logger.log(`Starting local signaling server on port ${this.settings.localServerPort}...`);
             await this.localServerService.startServer();
