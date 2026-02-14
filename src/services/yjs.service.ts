@@ -86,14 +86,14 @@ export class YjsService {
 
     // ─── Internet P2P (Trystero + MQTT) ─────────────────────────
 
-    startTrysteroProvider(roomName: string, password?: string) {
+    startTrysteroProvider(roomName: string, password?: string, relayUrls?: string[]) {
         if (this.trysteroProvider) {
             this.log('Destroying existing Trystero provider');
             this.trysteroProvider.destroy();
             this.trysteroProvider = null;
         }
 
-        this.log(`Starting TrysteroProvider for room: ${roomName}`);
+        this.log(`Starting TrysteroProvider for room: ${roomName}, relays: [${relayUrls?.join(', ') || 'defaults'}]`);
         try {
             this.trysteroProvider = new TrysteroProvider(
                 `mqtt-${roomName}`,
@@ -107,6 +107,9 @@ export class YjsService {
                             ...config,
                             appId: config.appId || 'obsidian-p2p-sync',
                             password: password || undefined,
+                            // relayUrls tells trystero which MQTT brokers to connect to
+                            // Without this, it falls back to hardcoded public brokers
+                            ...(relayUrls && relayUrls.length > 0 ? { relayUrls } : {}),
                         }, roomId);
                     },
                     password: password || undefined,

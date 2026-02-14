@@ -112,7 +112,25 @@ export default class P2PSyncPlugin extends Plugin {
         if (this.settings.enableMqttDiscovery) {
             this.logger.log('Starting Trystero provider (MQTT signaling)...');
             try {
-                this.yjsService.startTrysteroProvider(roomName, this.settings.secretKey);
+                // Build relay URL with optional credentials embedded
+                // trystero calls mqtt.connect(url) with only the URL, so credentials
+                // must be in the URL itself: wss://user:pass@host:port/mqtt
+                let relayUrls: string[] | undefined;
+                if (this.settings.discoveryServer) {
+                    let brokerUrl = this.settings.discoveryServer;
+                    if (this.settings.mqttUsername) {
+                        try {
+                            const url = new URL(brokerUrl);
+                            url.username = this.settings.mqttUsername;
+                            url.password = this.settings.mqttPassword || '';
+                            brokerUrl = url.toString();
+                        } catch (e) {
+                            this.logger.error('Invalid MQTT broker URL', e);
+                        }
+                    }
+                    relayUrls = [brokerUrl];
+                }
+                this.yjsService.startTrysteroProvider(roomName, this.settings.secretKey, relayUrls);
                 this.statusBarItem.setText('P2P: Online');
                 this.logger.log(`Trystero provider started for room: ${roomName}`);
             } catch (e) {

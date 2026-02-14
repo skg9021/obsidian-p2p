@@ -5,6 +5,8 @@ export interface P2PSettings {
     deviceName: string;
     secretKey: string;
     discoveryServer: string;
+    mqttUsername: string;
+    mqttPassword: string;
     iceServersJSON: string;
     enableLocalServer: boolean;
     localServerPort: number;
@@ -17,7 +19,9 @@ export interface P2PSettings {
 export const DEFAULT_SETTINGS: P2PSettings = {
     deviceName: 'Obsidian-Device-' + Math.floor(Math.random() * 1000),
     secretKey: 'my-secret-key',
-    discoveryServer: 'wss://test.mosquitto.org:8081',
+    discoveryServer: 'wss://test.mosquitto.org:8081/mqtt',
+    mqttUsername: '',
+    mqttPassword: '',
     iceServersJSON: '[{"urls":"stun:stun.l.google.com:19302"}]',
     enableLocalServer: false,
     localServerPort: 8080,
@@ -67,24 +71,51 @@ export class P2PSyncSettingTab extends PluginSettingTab {
 
         new Setting(containerEl)
             .setName('Enable MQTT Discovery')
-            .setDesc('Connect to a public MQTT broker for discovery over the internet')
+            .setDesc('Connect to an MQTT broker for peer discovery over the internet')
             .addToggle(toggle => toggle
                 .setValue(this.plugin.settings.enableMqttDiscovery)
                 .onChange(async (value) => {
                     this.plugin.settings.enableMqttDiscovery = value;
                     await this.plugin.saveSettingsDebounced();
+                    this.display();
                 }));
 
-        new Setting(containerEl)
-            .setName('MQTT Discovery Server')
-            .setDesc('WebSocket URL for MQTT broker')
-            .addText(text => text
-                .setPlaceholder('wss://broker.hivemq.com:8000/mqtt')
-                .setValue(this.plugin.settings.discoveryServer)
-                .onChange(async (value) => {
-                    this.plugin.settings.discoveryServer = value;
-                    await this.plugin.saveSettingsDebounced();
-                }));
+        if (this.plugin.settings.enableMqttDiscovery) {
+            new Setting(containerEl)
+                .setName('MQTT Broker URL')
+                .setDesc('WebSocket URL for MQTT broker (must end with /mqtt)')
+                .addText(text => text
+                    .setPlaceholder('wss://test.mosquitto.org:8081/mqtt')
+                    .setValue(this.plugin.settings.discoveryServer)
+                    .onChange(async (value) => {
+                        this.plugin.settings.discoveryServer = value;
+                        await this.plugin.saveSettingsDebounced();
+                    }));
+
+            new Setting(containerEl)
+                .setName('MQTT Username')
+                .setDesc('Optional — leave empty for public brokers')
+                .addText(text => text
+                    .setPlaceholder('username')
+                    .setValue(this.plugin.settings.mqttUsername)
+                    .onChange(async (value) => {
+                        this.plugin.settings.mqttUsername = value;
+                        await this.plugin.saveSettingsDebounced();
+                    }));
+
+            new Setting(containerEl)
+                .setName('MQTT Password')
+                .setDesc('Optional — leave empty for public brokers')
+                .addText(text => {
+                    text.inputEl.type = 'password';
+                    text.setPlaceholder('password')
+                        .setValue(this.plugin.settings.mqttPassword)
+                        .onChange(async (value) => {
+                            this.plugin.settings.mqttPassword = value;
+                            await this.plugin.saveSettingsDebounced();
+                        });
+                });
+        }
 
         new Setting(containerEl)
             .setName('ICE Servers (JSON)')
