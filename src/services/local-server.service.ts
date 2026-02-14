@@ -78,9 +78,26 @@ export class LocalServerService {
             const ipDisplay = ips.length > 0 ? ips.join(', ') : 'localhost';
 
             this.log(`Starting signaling server on port ${this.settings.localServerPort}...`);
-            this.localWss = new WebSocketServer({ port: this.settings.localServerPort });
-            new Notice(`Signaling Server: ws://${ipDisplay}:${this.settings.localServerPort}`);
-            this.log(`Signaling server started: ws://${ipDisplay}:${this.settings.localServerPort}`);
+            try {
+                this.localWss = new WebSocketServer({ port: this.settings.localServerPort });
+
+                this.localWss.on('error', (e: any) => {
+                    if (e.code === 'EADDRINUSE') {
+                        new Notice(`Port ${this.settings.localServerPort} is already in use!`);
+                        this.log('Server Error: Address in use', e);
+                        this.stopServer();
+                    } else {
+                        console.error('Server Error', e);
+                    }
+                });
+
+                new Notice(`Signaling Server: ws://${ipDisplay}:${this.settings.localServerPort}`);
+                this.log(`Signaling server started: ws://${ipDisplay}:${this.settings.localServerPort}`);
+            } catch (e) {
+                this.log('Failed to create WebSocketServer', e);
+                new Notice('Failed to start signaling server. Check logs.');
+                return;
+            }
 
             this.localWss.on('connection', (ws: any, req: any) => {
                 const remoteAddr = req?.socket?.remoteAddress || 'unknown';

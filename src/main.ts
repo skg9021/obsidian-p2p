@@ -17,6 +17,10 @@ export default class P2PSyncPlugin extends Plugin {
     connectedClients: string[] = [];
     settingsTab: P2PSyncSettingTab;
 
+    clientReconnectTimeout: any = null;
+    clientReconnectAttempts: number = 0;
+    maxReconnectDelay: number = 30000;
+
     saveSettingsDebounced = debounce(this.saveSettings.bind(this), 1000, true);
 
     async onload() {
@@ -131,13 +135,29 @@ export default class P2PSyncPlugin extends Plugin {
 
         // ─── Local LAN: Connect to remote host's signaling server ─
         if (this.settings.enableLocalClient && this.settings.localServerAddress) {
-            this.logger.log(`Connecting to remote signaling server at ${this.settings.localServerAddress}...`);
-            this.yjsService.startLocalWebrtcProvider(
-                this.settings.localServerAddress,
-                roomName,
-                this.settings.secretKey
-            );
-            this.logger.log('Client: local WebRTC provider started');
+            // Cancel any pending reconnects since we are starting fresh
+            if (this.clientReconnectTimeout) {
+                clearTimeout(this.clientReconnectTimeout);
+                this.clientReconnectTimeout = null;
+            }
+
+            this.checkConnection(this.settings.localServerAddress).then(canConnect => {
+                if (canConnect) {
+                    this.logger.log(`Connection to ${this.settings.localServerAddress} successful.`);
+                    this.clientReconnectAttempts = 0;
+                    this.yjsService.startLocalWebrtcProvider(
+                        this.settings.localServerAddress,
+                        roomName,
+                        this.settings.secretKey
+                    );
+                    this.logger.log('Client: local WebRTC provider started');
+                    // Re-emit peer list after reconnect
+                    this.yjsService.refreshPeerList();
+                } else {
+                    this.logger.log(`Connection to ${this.settings.localServerAddress} failed. Scheduling reconnect...`);
+                    this.scheduleReconnect(roomName);
+                }
+            });
         }
 
         this.statusBarItem.setText('P2P: Connected');
@@ -147,7 +167,36 @@ export default class P2PSyncPlugin extends Plugin {
         this.logger.log('--- connect() complete ---');
     }
 
+    scheduleReconnect(roomName: string) {
+        if (this.clientReconnectTimeout) clearTimeout(this.clientReconnectTimeout);
+
+        const delay = Math.min(1000 * Math.pow(2, this.clientReconnectAttempts), this.maxReconnectDelay);
+        this.logger.log(`Attempting reconnect in ${delay}ms (Attempt ${this.clientReconnectAttempts + 1})`);
+        this.statusBarItem.setText(`P2P: Retry in ${delay / 1000}s`);
+
+        this.clientReconnectTimeout = setTimeout(() => {
+            this.clientReconnectAttempts++;
+            this.connect(); // Re-trigger connect which checks connection again
+        }, delay);
+    }
+
+    async checkConnection(url: string): Promise<boolean> {
+        return new Promise((resolve) => {
+            try {
+                const socket = new WebSocket(url);
+                socket.onopen = () => { socket.close(); resolve(true); };
+                socket.onerror = () => { resolve(false); };
+            } catch (e) {
+                resolve(false);
+            }
+        });
+    }
+
     disconnect() {
+        if (this.clientReconnectTimeout) {
+            clearTimeout(this.clientReconnectTimeout);
+            this.clientReconnectTimeout = null;
+        }
         this.logger.log('--- disconnect() called ---');
         this.yjsService.stopTrysteroProvider();
         this.yjsService.stopLocalWebrtcProvider();

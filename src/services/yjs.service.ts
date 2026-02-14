@@ -175,7 +175,11 @@ export class YjsService {
     stopLocalWebrtcProvider() {
         if (this.localWebrtcProvider) {
             this.log('Stopping local WebrtcProvider');
-            this.localWebrtcProvider.destroy();
+            try {
+                this.localWebrtcProvider.destroy();
+            } catch (e) {
+                console.error('[P2P Yjs] Error stopping WebrtcProvider', e);
+            }
             this.localWebrtcProvider = null;
         }
     }
