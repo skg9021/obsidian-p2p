@@ -76,7 +76,12 @@ export class P2PSyncSettingTab extends PluginSettingTab {
                 .setValue(this.plugin.settings.enableMqttDiscovery)
                 .onChange(async (value) => {
                     this.plugin.settings.enableMqttDiscovery = value;
-                    await this.plugin.saveSettingsDebounced();
+                    await this.plugin.saveSettings();
+                    // Reconnect immediately when toggling the master switch
+                    this.plugin.disconnect();
+                    if (value) {
+                        await this.plugin.connect();
+                    }
                     this.display();
                 }));
 
@@ -89,7 +94,7 @@ export class P2PSyncSettingTab extends PluginSettingTab {
                     .setValue(this.plugin.settings.discoveryServer)
                     .onChange(async (value) => {
                         this.plugin.settings.discoveryServer = value;
-                        await this.plugin.saveSettingsDebounced();
+                        await this.plugin.saveSettings();
                     }));
 
             new Setting(containerEl)
@@ -100,7 +105,7 @@ export class P2PSyncSettingTab extends PluginSettingTab {
                     .setValue(this.plugin.settings.mqttUsername)
                     .onChange(async (value) => {
                         this.plugin.settings.mqttUsername = value;
-                        await this.plugin.saveSettingsDebounced();
+                        await this.plugin.saveSettings();
                     }));
 
             new Setting(containerEl)
@@ -112,9 +117,24 @@ export class P2PSyncSettingTab extends PluginSettingTab {
                         .setValue(this.plugin.settings.mqttPassword)
                         .onChange(async (value) => {
                             this.plugin.settings.mqttPassword = value;
-                            await this.plugin.saveSettingsDebounced();
+                            await this.plugin.saveSettings();
                         });
                 });
+
+            new Setting(containerEl)
+                .setName('Connect to Broker')
+                .setDesc('Apply the above settings and connect to the MQTT broker')
+                .addButton(button => button
+                    .setButtonText('Connect')
+                    .setCta()
+                    .onClick(async () => {
+                        button.setButtonText('Connecting...');
+                        button.setDisabled(true);
+                        this.plugin.disconnect();
+                        await this.plugin.connect();
+                        button.setButtonText('Connect');
+                        button.setDisabled(false);
+                    }));
         }
 
         new Setting(containerEl)
