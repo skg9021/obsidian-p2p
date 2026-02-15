@@ -86,14 +86,14 @@ export class YjsService {
 
     // ─── Internet P2P (Trystero + MQTT) ─────────────────────────
 
-    startTrysteroProvider(roomName: string, password?: string, relayUrls?: string[]) {
+    startTrysteroProvider(roomName: string, password?: string, relayUrls?: string[], mqttCredentials?: { username: string; password: string }) {
         if (this.trysteroProvider) {
             this.log('Destroying existing Trystero provider');
             this.trysteroProvider.destroy();
             this.trysteroProvider = null;
         }
 
-        this.log(`Starting TrysteroProvider for room: ${roomName}, relays: [${relayUrls?.join(', ') || 'defaults'}]`);
+        this.log(`Starting TrysteroProvider for room: ${roomName}, relays: [${relayUrls?.join(', ') || 'defaults'}], auth: ${mqttCredentials?.username ? 'yes' : 'no'}`);
         try {
             this.trysteroProvider = new TrysteroProvider(
                 `mqtt-${roomName}`,
@@ -108,8 +108,13 @@ export class YjsService {
                             appId: config.appId || 'obsidian-p2p-sync',
                             password: password || undefined,
                             // relayUrls tells trystero which MQTT brokers to connect to
-                            // Without this, it falls back to hardcoded public brokers
                             ...(relayUrls && relayUrls.length > 0 ? { relayUrls } : {}),
+                            // MQTT credentials passed directly to mqtt.connect() options
+                            // via our patched mqtt.js (bypasses URL credential parsing)
+                            ...(mqttCredentials?.username ? {
+                                mqttUsername: mqttCredentials.username,
+                                mqttPassword: mqttCredentials.password,
+                            } : {}),
                         }, roomId);
                     },
                     password: password || undefined,

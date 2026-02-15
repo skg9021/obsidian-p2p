@@ -93,6 +93,24 @@ const context = await esbuild.context({
             },
         },
         {
+            name: 'trystero-mqtt-patch',
+            setup(build) {
+                // Use patched mqtt.js that passes credentials directly to mqtt.connect()
+                // instead of relying on URL credential parsing
+                const patchedPath = require('path').resolve('src/mqtt-patched.js');
+                build.onResolve({ filter: /^trystero\/mqtt$/ }, () => {
+                    return { path: patchedPath };
+                });
+                // Resolve trystero internal modules needed by our patched mqtt.js
+                build.onResolve({ filter: /^trystero\/src\/strategy\.js$/ }, () => {
+                    return { path: require('path').resolve('node_modules/trystero/src/strategy.js') };
+                });
+                build.onResolve({ filter: /^trystero\/src\/utils\.js$/ }, () => {
+                    return { path: require('path').resolve('node_modules/trystero/src/utils.js') };
+                });
+            },
+        },
+        {
             name: 'deduplicate-yjs',
             setup(build) {
                 // Force all imports of yjs, y-protocols, and lib0 to resolve to
