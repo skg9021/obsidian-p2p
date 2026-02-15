@@ -246,7 +246,6 @@ export class P2PSyncSettingTab extends PluginSettingTab {
                     .onClick(async () => {
                         button.setButtonText('Connecting...');
                         button.setDisabled(true);
-                        this.plugin.disconnect();
                         await this.plugin.connect();
                         button.setButtonText('Connect');
                         button.setDisabled(false);

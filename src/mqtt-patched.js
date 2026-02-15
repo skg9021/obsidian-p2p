@@ -69,7 +69,7 @@ export const joinRoom = strategy({
                 })
                 .on('error', err => {
                     // Ignore expected errors during cleanup
-                    if (err.message === 'client disconnecting') return
+                    if (err.message?.includes('disconnecting')) return
                     console.error('[P2P mqtt-patched] MQTT error:', err)
                 })
 
