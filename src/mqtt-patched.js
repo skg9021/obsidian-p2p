@@ -71,8 +71,22 @@ export const joinRoom = strategy({
         }
     },
 
-    announce: (client, rootTopic) =>
-        client.publish(rootTopic, toJson({ peerId: selfId }))
+    announce: (() => {
+        let announceCount = 0
+        // Adaptive interval: fast discovery at first, then slow down to save quota
+        // strategy.js uses the return value as the next interval in ms
+        const fastIntervalMs = 5_000    // First few announces: 5s (quick peer discovery)
+        const slowIntervalMs = 60_000   // After that: 60s (maintenance, saves quota)
+        const fastAnnounceCount = 3     // Number of fast announces before slowing down
+
+        return (client, rootTopic) => {
+            announceCount++
+            client.publish(rootTopic, toJson({ peerId: selfId }))
+            const nextInterval = announceCount <= fastAnnounceCount ? fastIntervalMs : slowIntervalMs
+            console.log(`[P2P mqtt-patched] announce #${announceCount}, next in ${nextInterval / 1000}s`)
+            return nextInterval
+        }
+    })()
 })
 
 export const getRelaySockets = () => ({ ...sockets })
