@@ -68,6 +68,8 @@ export const joinRoom = strategy({
                     msgHandlers[clientId][topic]?.(topic, buffer.toString())
                 })
                 .on('error', err => {
+                    // Ignore expected errors during cleanup
+                    if (err.message === 'client disconnecting') return
                     console.error('[P2P mqtt-patched] MQTT error:', err)
                 })
 
@@ -111,7 +113,12 @@ export const joinRoom = strategy({
 
         return (client, rootTopic) => {
             announceCount++
-            client.publish(rootTopic, toJson({ peerId: selfId }))
+            try {
+                client.publish(rootTopic, toJson({ peerId: selfId }))
+            } catch (e) {
+                // Client may have been force-closed by closeAllClients()
+                return slowIntervalMs
+            }
             const nextInterval = announceCount <= fastAnnounceCount ? fastIntervalMs : slowIntervalMs
             console.log(`[P2P mqtt-patched] announce #${announceCount}, next in ${nextInterval / 1000}s`)
             return nextInterval
