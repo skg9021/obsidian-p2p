@@ -27,8 +27,8 @@ export class YjsService {
     /** Local LAN P2P provider (y-webrtc + WebSocket signaling) */
     localWebrtcProvider: any | null = null;
 
-    /** Track connected peer client IDs per provider for source labeling */
-    private trysteroClientIds: Set<number> = new Set();
+    /** Track which awareness client IDs were learned through which provider */
+    private internetClientIds: Set<number> = new Set();
     private localClientIds: Set<number> = new Set();
 
     /** Callback when peer list changes */
@@ -49,6 +49,22 @@ export class YjsService {
         // Listen for awareness changes to track peers
         this.awareness.on('change', () => {
             this.emitPeerList();
+        });
+
+        // Track which provider each peer's awareness came through.
+        // When awareness data arrives via a WebRTC connection, `origin` is
+        // the WebrtcConn object which has a `.room.name` — our rooms use
+        // 'mqtt-' and 'lan-' prefixes to distinguish providers.
+        this.awareness.on('update', ({ added, removed }: any, origin: any) => {
+            const roomName = origin?.room?.name;
+            if (!roomName) return; // local change or non-WebRTC origin
+            if (roomName.startsWith('mqtt-')) {
+                added?.forEach((id: number) => this.internetClientIds.add(id));
+                removed?.forEach((id: number) => this.internetClientIds.delete(id));
+            } else if (roomName.startsWith('lan-')) {
+                added?.forEach((id: number) => this.localClientIds.add(id));
+                removed?.forEach((id: number) => this.localClientIds.delete(id));
+            }
         });
 
         this.ydoc.on('update', (update: Uint8Array, origin: any) => {
@@ -78,12 +94,18 @@ export class YjsService {
             if (clientId === this.ydoc.clientID) return; // Skip self
             if (state && state.name) {
                 const inLocal = this.localClientIds.has(clientId);
-                const inInternet = this.trysteroClientIds.has(clientId);
-                const source: PeerInfo['source'] = (inLocal && inInternet) ? 'both' : inLocal ? 'local' : inInternet ? 'internet' : 'local';
+                const inInternet = this.internetClientIds.has(clientId);
+                const source: PeerInfo['source'] =
+                    (inLocal && inInternet) ? 'both' :
+                        inInternet ? 'internet' :
+                            inLocal ? 'local' :
+                                // Fallback: if we haven't seen this peer through either
+                                // provider yet, infer from which providers are active
+                                this.trysteroProvider ? 'internet' : 'local';
                 peers.push({ name: state.name, ip: state.ip, clientId, source });
             }
         });
-        this.log(`Peers updated: [${peers.map(p => p.name).join(', ')}]`);
+        this.log(`Peers updated: [${peers.map(p => `${p.name}(${p.source})`).join(', ')}]`);
         this.onPeersUpdated(peers);
     }
 
@@ -135,8 +157,6 @@ export class YjsService {
 
             this.trysteroProvider.on('peers', (event: any) => {
                 this.log(`Trystero peers: added=${event.added}, removed=${event.removed}`);
-                if (event.added) event.added.forEach((id: number) => this.trysteroClientIds.add(id));
-                if (event.removed) event.removed.forEach((id: number) => this.trysteroClientIds.delete(id));
                 this.emitPeerList();
             });
 
@@ -155,7 +175,7 @@ export class YjsService {
             closeAllClients();
             this.trysteroProvider.destroy();
             this.trysteroProvider = null;
-            this.trysteroClientIds.clear();
+            this.internetClientIds.clear();
         }
     }
 
@@ -188,8 +208,6 @@ export class YjsService {
 
             this.localWebrtcProvider.on('peers', (event: any) => {
                 this.log(`Local WebRTC peers changed`);
-                if (event.added) event.added.forEach((id: number) => this.localClientIds.add(id));
-                if (event.removed) event.removed.forEach((id: number) => this.localClientIds.delete(id));
                 this.emitPeerList();
             });
 
@@ -208,6 +226,7 @@ export class YjsService {
                 console.error('[P2P Yjs] Error stopping WebrtcProvider', e);
             }
             this.localWebrtcProvider = null;
+            this.localClientIds.clear();
         }
     }
 
