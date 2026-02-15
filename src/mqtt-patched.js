@@ -4,6 +4,8 @@
  * Changes from original:
  * - Passes config.mqttUsername/mqttPassword directly to mqtt.connect() options
  *   instead of relying on URL credential parsing (which can fail in Electron)
+ * - Properly closes MQTT clients on room leave (subscribe cleanup)
+ * - Adaptive announce interval (fast discovery, then slow maintenance)
  */
 import mqtt from 'mqtt'
 import strategy from 'trystero/src/strategy.js'
@@ -63,11 +65,16 @@ export const joinRoom = strategy({
         client.subscribe(rootTopic)
         client.subscribe(selfTopic)
 
+        // Cleanup: called by strategy.js when leaving room
+        // Must close the MQTT client to prevent connection leaks
         return () => {
+            console.log('[P2P mqtt-patched] Cleaning up MQTT client:', clientId)
             client.unsubscribe(rootTopic)
             client.unsubscribe(selfTopic)
-            delete msgHandlers[clientId][rootTopic]
-            delete msgHandlers[clientId][selfTopic]
+            delete msgHandlers[clientId]
+            delete sockets[clientId]
+            client.end(true) // force-close the MQTT connection
+            console.log('[P2P mqtt-patched] MQTT client closed:', clientId)
         }
     },
 
