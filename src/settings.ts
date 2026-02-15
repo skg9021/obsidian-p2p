@@ -33,10 +33,45 @@ export const DEFAULT_SETTINGS: P2PSettings = {
 
 export class P2PSyncSettingTab extends PluginSettingTab {
     plugin: P2PSyncPlugin;
+    private peerListContainer: HTMLElement | null = null;
 
     constructor(app: App, plugin: P2PSyncPlugin) {
         super(app, plugin);
         this.plugin = plugin;
+    }
+
+    /** Update only the Connected Peers section without rebuilding the entire settings page */
+    updatePeerList() {
+        if (this.peerListContainer) {
+            this.renderPeerList(this.peerListContainer);
+        }
+    }
+
+    private renderPeerList(container: HTMLElement) {
+        container.empty();
+        const peers = this.plugin.connectedClients;
+        if (peers.length === 0) {
+            container.createEl('p', { text: 'No peers connected.' });
+        } else {
+            const localPeers = peers.filter(p => p.source === 'local' || p.source === 'both');
+            const internetPeers = peers.filter(p => p.source === 'internet' || p.source === 'both');
+
+            if (localPeers.length > 0) {
+                container.createEl('h4', { text: '🏠 Local Network' });
+                const ul = container.createEl('ul');
+                localPeers.forEach(p => {
+                    ul.createEl('li', { text: p.ip ? `${p.name} — ${p.ip}` : p.name });
+                });
+            }
+
+            if (internetPeers.length > 0) {
+                container.createEl('h4', { text: '🌐 Internet (MQTT)' });
+                const ul = container.createEl('ul');
+                internetPeers.forEach(p => {
+                    ul.createEl('li', { text: p.ip ? `${p.name} — ${p.ip}` : p.name });
+                });
+            }
+        }
     }
 
     display(): void {
@@ -174,7 +209,7 @@ export class P2PSyncSettingTab extends PluginSettingTab {
                     .setValue(this.plugin.settings.discoveryServer)
                     .onChange(async (value) => {
                         this.plugin.settings.discoveryServer = value;
-                        await this.plugin.saveSettings();
+                        await this.plugin.saveSettingsDebounced();
                     }));
 
             new Setting(containerEl)
@@ -185,7 +220,7 @@ export class P2PSyncSettingTab extends PluginSettingTab {
                     .setValue(this.plugin.settings.mqttUsername)
                     .onChange(async (value) => {
                         this.plugin.settings.mqttUsername = value;
-                        await this.plugin.saveSettings();
+                        await this.plugin.saveSettingsDebounced();
                     }));
 
             new Setting(containerEl)
@@ -197,7 +232,7 @@ export class P2PSyncSettingTab extends PluginSettingTab {
                         .setValue(this.plugin.settings.mqttPassword)
                         .onChange(async (value) => {
                             this.plugin.settings.mqttPassword = value;
-                            await this.plugin.saveSettings();
+                            await this.plugin.saveSettingsDebounced();
                         });
                 });
 
@@ -230,30 +265,8 @@ export class P2PSyncSettingTab extends PluginSettingTab {
 
         // ─── Connected Peers ─────────────────────────────────────
         containerEl.createEl('h3', { text: 'Connected Peers' });
-        const clientsDiv = containerEl.createEl('div', { cls: 'connected-clients-list' });
-        const peers = this.plugin.connectedClients;
-        if (peers.length === 0) {
-            clientsDiv.createEl('p', { text: 'No peers connected.' });
-        } else {
-            const localPeers = peers.filter(p => p.source === 'local' || p.source === 'both');
-            const internetPeers = peers.filter(p => p.source === 'internet' || p.source === 'both');
-
-            if (localPeers.length > 0) {
-                clientsDiv.createEl('h4', { text: '🏠 Local Network' });
-                const ul = clientsDiv.createEl('ul');
-                localPeers.forEach(p => {
-                    ul.createEl('li', { text: p.ip ? `${p.name} — ${p.ip}` : p.name });
-                });
-            }
-
-            if (internetPeers.length > 0) {
-                clientsDiv.createEl('h4', { text: '🌐 Internet (MQTT)' });
-                const ul = clientsDiv.createEl('ul');
-                internetPeers.forEach(p => {
-                    ul.createEl('li', { text: p.ip ? `${p.name} — ${p.ip}` : p.name });
-                });
-            }
-        }
+        this.peerListContainer = containerEl.createEl('div', { cls: 'connected-clients-list' });
+        this.renderPeerList(this.peerListContainer);
 
         // ─── Debug & Advanced ────────────────────────────────────
         containerEl.createEl('h3', { text: 'Debug & Advanced' });

@@ -40,7 +40,7 @@ export default class P2PSyncPlugin extends Plugin {
         this.yjsService.onPeersUpdated = (peers) => {
             this.logger.log(`Awareness peers: [${peers.map(p => `${p.name}(${p.source})`).join(', ')}]`);
             this.connectedClients = peers;
-            if (this.settingsTab) this.settingsTab.display();
+            if (this.settingsTab) this.settingsTab.updatePeerList();
         };
         // Set our local IPs in awareness
         this.localServerService = new LocalServerService(this.settings);
@@ -241,7 +241,6 @@ export default class P2PSyncPlugin extends Plugin {
         if (this.security) {
             await this.security.deriveKey(this.settings.secretKey);
         }
-        this.connect();
     }
 
     async getLocalIPs() {
