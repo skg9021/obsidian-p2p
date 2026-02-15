@@ -3,7 +3,7 @@ import { App, TFile, TAbstractFile, debounce } from 'obsidian';
 // @ts-ignore - no types for this package
 import { TrysteroProvider } from '@winstonfassett/y-webrtc-trystero';
 // @ts-ignore
-import { joinRoom } from 'trystero/mqtt';
+import { joinRoom, closeAllClients } from 'trystero/mqtt';
 // @ts-ignore
 import { WebrtcProvider } from 'y-webrtc';
 import * as awarenessProtocol from 'y-protocols/awareness';
@@ -149,6 +149,10 @@ export class YjsService {
     stopTrysteroProvider() {
         if (this.trysteroProvider) {
             this.log('Stopping TrysteroProvider');
+            // Force-close MQTT clients BEFORE provider.destroy(), because
+            // WebrtcProvider.destroy() defers room cleanup via this.key.then(),
+            // so the normal subscribe cleanup runs too late.
+            closeAllClients();
             this.trysteroProvider.destroy();
             this.trysteroProvider = null;
             this.trysteroClientIds.clear();

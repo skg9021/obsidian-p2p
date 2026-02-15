@@ -4,7 +4,9 @@
  * Changes from original:
  * - Passes config.mqttUsername/mqttPassword directly to mqtt.connect() options
  *   instead of relying on URL credential parsing (which can fail in Electron)
- * - Properly closes MQTT clients on room leave AND before re-init
+ * - Exports closeAllClients() for explicit cleanup (needed because
+ *   WebrtcProvider.destroy() defers room cleanup via a Promise, so the
+ *   subscribe cleanup runs too late when reconnecting)
  * - Adaptive announce interval (fast discovery, then slow maintenance)
  */
 import mqtt from 'mqtt'
@@ -16,10 +18,27 @@ const defaultRedundancy = 4
 const msgHandlers = {}
 const getClientId = ({ options }) => options.host + options.path
 
-// Track all active MQTT clients so we can force-close them before reconnecting.
-// This is necessary because strategy.js cleanup is fire-and-forget async,
-// so client.end() from subscribe cleanup may not complete before a new init().
+// Track all active MQTT clients for explicit cleanup
 const activeClients = new Set()
+
+/**
+ * Force-close all active MQTT clients.
+ * Must be called BEFORE creating new providers, because
+ * WebrtcProvider.destroy() defers cleanup via this.key.then(),
+ * meaning the normal subscribe cleanup runs too late.
+ */
+export const closeAllClients = () => {
+    if (activeClients.size > 0) {
+        console.log(`[P2P mqtt-patched] Force-closing ${activeClients.size} active MQTT client(s)`)
+        activeClients.forEach(c => {
+            try { c.end(true) } catch (e) { /* ignore */ }
+        })
+        activeClients.clear()
+        // Also clean up module-level maps
+        Object.keys(sockets).forEach(k => delete sockets[k])
+        Object.keys(msgHandlers).forEach(k => delete msgHandlers[k])
+    }
+}
 
 export const joinRoom = strategy({
     init: config => {
@@ -27,17 +46,6 @@ export const joinRoom = strategy({
         console.log('[P2P mqtt-patched] mqttUsername:', config.mqttUsername ? `"${config.mqttUsername}"` : '(not set)')
         console.log('[P2P mqtt-patched] mqttPassword:', config.mqttPassword ? '(set, length=' + config.mqttPassword.length + ')' : '(not set)')
         console.log('[P2P mqtt-patched] relayUrls:', config.relayUrls)
-
-        // Force-close any leftover MQTT clients from a previous session.
-        // This prevents "Bad username or password" errors from brokers that
-        // reject duplicate connections with the same credentials.
-        if (activeClients.size > 0) {
-            console.log(`[P2P mqtt-patched] Closing ${activeClients.size} leftover MQTT client(s)`)
-            activeClients.forEach(c => {
-                try { c.end(true) } catch (e) { /* ignore */ }
-            })
-            activeClients.clear()
-        }
 
         return getRelays(config, defaultRelayUrls, defaultRedundancy).map(url => {
             // Pass MQTT credentials directly via options instead of URL embedding
@@ -81,15 +89,15 @@ export const joinRoom = strategy({
         client.subscribe(rootTopic)
         client.subscribe(selfTopic)
 
-        // Cleanup: called by strategy.js when leaving room
+        // Cleanup: called by strategy.js when leaving room (deferred, may run late)
         return () => {
-            console.log('[P2P mqtt-patched] Cleanup: closing MQTT client', clientId)
+            console.log('[P2P mqtt-patched] Subscribe cleanup for', clientId)
             client.unsubscribe(rootTopic)
             client.unsubscribe(selfTopic)
             delete msgHandlers[clientId]
             delete sockets[clientId]
             activeClients.delete(client)
-            client.end(true)
+            try { client.end(true) } catch (e) { /* may already be closed by closeAllClients */ }
         }
     },
 
