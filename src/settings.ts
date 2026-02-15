@@ -43,6 +43,7 @@ export class P2PSyncSettingTab extends PluginSettingTab {
         const { containerEl } = this;
         containerEl.empty();
 
+        // ─── General ─────────────────────────────────────────────
         containerEl.createEl('h2', { text: 'P2P Sync Settings' });
 
         new Setting(containerEl)
@@ -58,7 +59,7 @@ export class P2PSyncSettingTab extends PluginSettingTab {
 
         new Setting(containerEl)
             .setName('Secret Key')
-            .setDesc('Shared secret for encryption and discovery (Must be same on all devices)')
+            .setDesc('Shared secret for encryption and discovery (must be same on all devices)')
             .addText(text => text
                 .setPlaceholder('Enter secret key')
                 .setValue(this.plugin.settings.secretKey)
@@ -67,7 +68,87 @@ export class P2PSyncSettingTab extends PluginSettingTab {
                     await this.plugin.saveSettingsDebounced();
                 }));
 
-        containerEl.createEl('h3', { text: 'Discovery & Signaling' });
+        // ─── Local Network ───────────────────────────────────────
+        containerEl.createEl('h3', { text: 'Local Network' });
+
+        // Host Mode
+        new Setting(containerEl)
+            .setName('Enable Host Mode')
+            .setDesc('Start a local WebSocket server for other devices on your LAN')
+            .addToggle(toggle => toggle
+                .setValue(this.plugin.settings.enableLocalServer)
+                .onChange(async (value) => {
+                    this.plugin.settings.enableLocalServer = value;
+                    await this.plugin.saveSettingsDebounced();
+                    this.display();
+                }));
+
+        if (this.plugin.settings.enableLocalServer) {
+            new Setting(containerEl)
+                .setName('Server Name')
+                .setDesc('This is the name clients will see when they connect')
+                .addText(text => text
+                    .setValue(this.plugin.settings.deviceName)
+                    .setDisabled(true));
+
+            new Setting(containerEl)
+                .setName('Host Port')
+                .setDesc('Port for the local server')
+                .addText(text => text
+                    .setPlaceholder('8080')
+                    .setValue(String(this.plugin.settings.localServerPort))
+                    .onChange(async (value) => {
+                        this.plugin.settings.localServerPort = Number(value);
+                        await this.plugin.saveSettingsDebounced();
+                    }));
+
+            const ipSetting = new Setting(containerEl)
+                .setName('Server IP Addresses')
+                .setDesc('Fetching...');
+
+            this.plugin.getLocalIPs().then(ips => {
+                const ipText = ips.length > 0 ? ips.join(', ') : 'Unknown (Check Console)';
+                ipSetting.setDesc(`Use this IP to connect other devices: ${ipText}`);
+            });
+
+            new Setting(containerEl)
+                .setName('Restart Server')
+                .setDesc('Stop and restart the local WebSocket server')
+                .addButton(button => button
+                    .setButtonText('Restart')
+                    .onClick(() => {
+                        this.plugin.restartLocalServer();
+                        new Notice('Local Server Restarted');
+                    }));
+        }
+
+        // Client Mode
+        new Setting(containerEl)
+            .setName('Enable Local Client')
+            .setDesc('Connect to a host on the local network for P2P sync')
+            .addToggle(toggle => toggle
+                .setValue(this.plugin.settings.enableLocalClient)
+                .onChange(async (value) => {
+                    this.plugin.settings.enableLocalClient = value;
+                    await this.plugin.saveSettingsDebounced();
+                    this.display();
+                }));
+
+        if (this.plugin.settings.enableLocalClient) {
+            new Setting(containerEl)
+                .setName('Host Address')
+                .setDesc('WebSocket address of the host (e.g., ws://192.168.1.5:8080)')
+                .addText(text => text
+                    .setPlaceholder('ws://localhost:8080')
+                    .setValue(this.plugin.settings.localServerAddress)
+                    .onChange(async (value) => {
+                        this.plugin.settings.localServerAddress = value;
+                        await this.plugin.saveSettingsDebounced();
+                    }));
+        }
+
+        // ─── Internet (MQTT) ─────────────────────────────────────
+        containerEl.createEl('h3', { text: 'Internet (MQTT)' });
 
         new Setting(containerEl)
             .setName('Enable MQTT Discovery')
@@ -77,7 +158,6 @@ export class P2PSyncSettingTab extends PluginSettingTab {
                 .onChange(async (value) => {
                     this.plugin.settings.enableMqttDiscovery = value;
                     await this.plugin.saveSettings();
-                    // Reconnect immediately when toggling the master switch
                     this.plugin.disconnect();
                     if (value) {
                         await this.plugin.connect();
@@ -139,7 +219,7 @@ export class P2PSyncSettingTab extends PluginSettingTab {
 
         new Setting(containerEl)
             .setName('ICE Servers (JSON)')
-            .setDesc('STUN/TURN servers for WebRTC')
+            .setDesc('STUN/TURN servers for WebRTC NAT traversal')
             .addTextArea(text => text
                 .setPlaceholder('[{"urls":"stun:stun.l.google.com:19302"}]')
                 .setValue(this.plugin.settings.iceServersJSON)
@@ -148,89 +228,34 @@ export class P2PSyncSettingTab extends PluginSettingTab {
                     await this.plugin.saveSettingsDebounced();
                 }));
 
-        containerEl.createEl('h3', { text: 'Local Network (Host Mode)' });
-
-        new Setting(containerEl)
-            .setName('Enable Host Mode (Server)')
-            .setDesc('Start a local WebSocket server for other devices on the LAN')
-            .addToggle(toggle => toggle
-                .setValue(this.plugin.settings.enableLocalServer)
-                .onChange(async (value) => {
-                    this.plugin.settings.enableLocalServer = value;
-                    await this.plugin.saveSettingsDebounced();
-                    // Force refresh to show/hide IP
-                    this.display();
-                }));
-
-        if (this.plugin.settings.enableLocalServer) {
-            new Setting(containerEl)
-                .setName('Server Name')
-                .setDesc('This is the name clients will see when they connect')
-                .addText(text => text
-                    .setValue(this.plugin.settings.deviceName)
-                    .setDisabled(true));
-
-            new Setting(containerEl)
-                .setName('Host Port')
-                .setDesc('Port for the local server')
-                .addText(text => text
-                    .setPlaceholder('8080')
-                    .setValue(String(this.plugin.settings.localServerPort))
-                    .onChange(async (value) => {
-                        this.plugin.settings.localServerPort = Number(value);
-                        await this.plugin.saveSettingsDebounced();
-                    }));
-
-            const ipSetting = new Setting(containerEl)
-                .setName('Server IP Addresses')
-                .setDesc('Fetching...');
-
-            // Assuming getLocalIPs is available on plugin via service or helper
-            // We kept the helper in main.ts
-            this.plugin.getLocalIPs().then(ips => {
-                const ipText = ips.length > 0 ? ips.join(', ') : 'Unknown (Check Console)';
-                ipSetting.setDesc(`Use this IP to connect other devices: ${ipText}`);
-            });
-        }
-
-        // Connected Peers List (visible to both host and client via awareness)
+        // ─── Connected Peers ─────────────────────────────────────
         containerEl.createEl('h3', { text: 'Connected Peers' });
         const clientsDiv = containerEl.createEl('div', { cls: 'connected-clients-list' });
-        if (this.plugin.connectedClients.length === 0) {
+        const peers = this.plugin.connectedClients;
+        if (peers.length === 0) {
             clientsDiv.createEl('p', { text: 'No peers connected.' });
         } else {
-            const ul = clientsDiv.createEl('ul');
-            this.plugin.connectedClients.forEach(client => {
-                ul.createEl('li', { text: client });
-            });
+            const localPeers = peers.filter(p => p.source === 'local' || p.source === 'both');
+            const internetPeers = peers.filter(p => p.source === 'internet' || p.source === 'both');
+
+            if (localPeers.length > 0) {
+                clientsDiv.createEl('h4', { text: '🏠 Local Network' });
+                const ul = clientsDiv.createEl('ul');
+                localPeers.forEach(p => {
+                    ul.createEl('li', { text: p.ip ? `${p.name} — ${p.ip}` : p.name });
+                });
+            }
+
+            if (internetPeers.length > 0) {
+                clientsDiv.createEl('h4', { text: '🌐 Internet (MQTT)' });
+                const ul = clientsDiv.createEl('ul');
+                internetPeers.forEach(p => {
+                    ul.createEl('li', { text: p.ip ? `${p.name} — ${p.ip}` : p.name });
+                });
+            }
         }
 
-        containerEl.createEl('h3', { text: 'Local Client (Connect to Host)' });
-
-        new Setting(containerEl)
-            .setName('Enable Local Client')
-            .setDesc('Connect to a host on the local network for P2P sync')
-            .addToggle(toggle => toggle
-                .setValue(this.plugin.settings.enableLocalClient)
-                .onChange(async (value) => {
-                    this.plugin.settings.enableLocalClient = value;
-                    await this.plugin.saveSettingsDebounced();
-                    this.display();
-                }));
-
-        if (this.plugin.settings.enableLocalClient) {
-            new Setting(containerEl)
-                .setName('Host Address')
-                .setDesc('WebSocket address of the host (e.g., ws://192.168.1.5:8080)')
-                .addText(text => text
-                    .setPlaceholder('ws://localhost:8080')
-                    .setValue(this.plugin.settings.localServerAddress)
-                    .onChange(async (value) => {
-                        this.plugin.settings.localServerAddress = value;
-                        await this.plugin.saveSettingsDebounced();
-                    }));
-        }
-
+        // ─── Debug & Advanced ────────────────────────────────────
         containerEl.createEl('h3', { text: 'Debug & Advanced' });
 
         new Setting(containerEl)
@@ -243,24 +268,11 @@ export class P2PSyncSettingTab extends PluginSettingTab {
                     await this.plugin.saveSettingsDebounced();
                 }));
 
-        if (this.plugin.settings.enableLocalServer) {
-            new Setting(containerEl)
-                .setName('Manage Local Server')
-                .setDesc('Control the local WebSocket server')
-                .addButton(button => button
-                    .setButtonText('Restart Server')
-                    .setCta()
-                    .onClick(() => {
-                        this.plugin.restartLocalServer();
-                        new Notice('Local Server Restarted');
-                    }));
-        }
-
         new Setting(containerEl)
-            .setName('Troubleshooting')
-            .setDesc('Manually attempt to find and connect to servers/peers')
+            .setName('Reconnect All')
+            .setDesc('Disconnect and reconnect all P2P connections')
             .addButton(button => button
-                .setButtonText('Find Server / Reconnect')
+                .setButtonText('Reconnect')
                 .onClick(() => {
                     this.plugin.connect();
                     new Notice('Reconnecting...');

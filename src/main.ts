@@ -1,7 +1,7 @@
 import { Plugin, App, TFile, Notice, TAbstractFile, Platform, debounce } from 'obsidian';
 import { SecurityService } from './security';
 import { P2PSettings, DEFAULT_SETTINGS, P2PSyncSettingTab } from './settings';
-import { YjsService } from './services/yjs.service';
+import { YjsService, PeerInfo } from './services/yjs.service';
 import { LocalServerService } from './services/local-server.service';
 import { Logger } from './services/logger.service';
 
@@ -14,7 +14,7 @@ export default class P2PSyncPlugin extends Plugin {
     yjsService: YjsService;
     localServerService: LocalServerService;
 
-    connectedClients: string[] = [];
+    connectedClients: PeerInfo[] = [];
     settingsTab: P2PSyncSettingTab;
 
     clientReconnectTimeout: any = null;
@@ -38,9 +38,8 @@ export default class P2PSyncPlugin extends Plugin {
         // Initialize Yjs Service (manages Y.Doc + both P2P providers + awareness)
         this.yjsService = new YjsService(this.app, this.settings);
         this.yjsService.onPeersUpdated = (peers) => {
-            const peerLabels = peers.map(p => p.ip ? `${p.name} - ${p.ip}` : p.name);
-            this.logger.log(`Awareness peers: [${peerLabels.join(', ')}]`);
-            this.connectedClients = peerLabels;
+            this.logger.log(`Awareness peers: [${peers.map(p => `${p.name}(${p.source})`).join(', ')}]`);
+            this.connectedClients = peers;
             if (this.settingsTab) this.settingsTab.display();
         };
         // Set our local IPs in awareness

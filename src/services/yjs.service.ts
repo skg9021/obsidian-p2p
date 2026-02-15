@@ -13,6 +13,7 @@ export interface PeerInfo {
     name: string;
     ip?: string;
     clientId: number;
+    source: 'local' | 'internet' | 'both';
 }
 
 export class YjsService {
@@ -25,6 +26,10 @@ export class YjsService {
     trysteroProvider: any | null = null;
     /** Local LAN P2P provider (y-webrtc + WebSocket signaling) */
     localWebrtcProvider: any | null = null;
+
+    /** Track connected peer client IDs per provider for source labeling */
+    private trysteroClientIds: Set<number> = new Set();
+    private localClientIds: Set<number> = new Set();
 
     /** Callback when peer list changes */
     onPeersUpdated: (peers: PeerInfo[]) => void = () => { };
@@ -72,7 +77,10 @@ export class YjsService {
         this.awareness.getStates().forEach((state: any, clientId: number) => {
             if (clientId === this.ydoc.clientID) return; // Skip self
             if (state && state.name) {
-                peers.push({ name: state.name, ip: state.ip, clientId });
+                const inLocal = this.localClientIds.has(clientId);
+                const inInternet = this.trysteroClientIds.has(clientId);
+                const source: PeerInfo['source'] = (inLocal && inInternet) ? 'both' : inLocal ? 'local' : inInternet ? 'internet' : 'local';
+                peers.push({ name: state.name, ip: state.ip, clientId, source });
             }
         });
         this.log(`Peers updated: [${peers.map(p => p.name).join(', ')}]`);
@@ -127,6 +135,9 @@ export class YjsService {
 
             this.trysteroProvider.on('peers', (event: any) => {
                 this.log(`Trystero peers: added=${event.added}, removed=${event.removed}`);
+                if (event.added) event.added.forEach((id: number) => this.trysteroClientIds.add(id));
+                if (event.removed) event.removed.forEach((id: number) => this.trysteroClientIds.delete(id));
+                this.emitPeerList();
             });
 
             this.log('TrysteroProvider started');
@@ -140,6 +151,7 @@ export class YjsService {
             this.log('Stopping TrysteroProvider');
             this.trysteroProvider.destroy();
             this.trysteroProvider = null;
+            this.trysteroClientIds.clear();
         }
     }
 
@@ -172,6 +184,9 @@ export class YjsService {
 
             this.localWebrtcProvider.on('peers', (event: any) => {
                 this.log(`Local WebRTC peers changed`);
+                if (event.added) event.added.forEach((id: number) => this.localClientIds.add(id));
+                if (event.removed) event.removed.forEach((id: number) => this.localClientIds.delete(id));
+                this.emitPeerList();
             });
 
             this.log('Local WebrtcProvider started');
