@@ -1,6 +1,6 @@
 /**
  * Patched version of trystero/src/mqtt.js
- * 
+ *
  * Changes from original:
  * - Passes config.mqttUsername/mqttPassword directly to mqtt.connect() options
  *   instead of relying on URL credential parsing (which can fail in Electron)
@@ -15,14 +15,20 @@ const msgHandlers = {}
 const getClientId = ({ options }) => options.host + options.path
 
 export const joinRoom = strategy({
-    init: config =>
-        getRelays(config, defaultRelayUrls, defaultRedundancy).map(url => {
+    init: config => {
+        console.log('[P2P mqtt-patched] init called, config keys:', Object.keys(config))
+        console.log('[P2P mqtt-patched] mqttUsername:', config.mqttUsername ? `"${config.mqttUsername}"` : '(not set)')
+        console.log('[P2P mqtt-patched] mqttPassword:', config.mqttPassword ? '(set, length=' + config.mqttPassword.length + ')' : '(not set)')
+        console.log('[P2P mqtt-patched] relayUrls:', config.relayUrls)
+
+        return getRelays(config, defaultRelayUrls, defaultRedundancy).map(url => {
             // Pass MQTT credentials directly via options instead of URL embedding
             const connectOpts = {}
             if (config.mqttUsername) {
                 connectOpts.username = config.mqttUsername
                 connectOpts.password = config.mqttPassword || ''
             }
+            console.log('[P2P mqtt-patched] mqtt.connect URL:', url, 'opts:', JSON.stringify(connectOpts))
             const client = mqtt.connect(url, connectOpts)
             const clientId = getClientId(client)
 
@@ -33,10 +39,11 @@ export const joinRoom = strategy({
                 .on('message', (topic, buffer) =>
                     msgHandlers[clientId][topic]?.(topic, buffer.toString())
                 )
-                .on('error', err => console.error(err))
+                .on('error', err => console.error('[P2P mqtt-patched] MQTT error:', err))
 
             return new Promise(res => client.on('connect', () => res(client)))
-        }),
+        })
+    },
 
     subscribe: (client, rootTopic, selfTopic, onMessage) => {
         const clientId = getClientId(client)
