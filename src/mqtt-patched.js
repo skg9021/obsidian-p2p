@@ -36,12 +36,19 @@ export const joinRoom = strategy({
             msgHandlers[clientId] = {}
 
             client
-                .on('message', (topic, buffer) =>
+                .on('message', (topic, buffer) => {
+                    console.log('[P2P mqtt-patched] MQTT message:', topic, buffer.toString())
                     msgHandlers[clientId][topic]?.(topic, buffer.toString())
-                )
-                .on('error', err => console.error('[P2P mqtt-patched] MQTT error:', err))
+                })
+                .on('error', err => {
+                    console.error('[P2P mqtt-patched] Some error in MQTT connection')
+                    console.error('[P2P mqtt-patched] MQTT error:', err)
+                })
 
-            return new Promise(res => client.on('connect', () => res(client)))
+            return new Promise(res => client.on('connect', () => {
+                console.log('[P2P mqtt-patched] MQTT connected')
+                res(client)
+            }))
         })
     },
 
