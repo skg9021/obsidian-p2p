@@ -19,6 +19,7 @@ export class FileTransferService {
     private transferAction: { [key: string]: any } = {}; // Map provider -> actions
     private pendingDownloads: Set<string> = new Set();
     private cacheDir: string;
+    private pathHashCache: Map<string, string> = new Map();
 
     constructor(
         private app: App,
@@ -39,12 +40,32 @@ export class FileTransferService {
     }
 
     initialize() {
+        // 0. Populate cache from existing registry
+        for (const [hash, metadata] of this.fileRegistry.entries()) {
+            // @ts-ignore
+            const meta = metadata as FileMetadata;
+            this.pathHashCache.set(meta.path, hash);
+        }
+
         // 1. Listen for metadata changes
         this.fileRegistry.observe((event) => {
             event.changes.keys.forEach((change, key) => {
+                const metadata = this.fileRegistry.get(key);
                 if (change.action === 'add' || change.action === 'update') {
-                    const metadata = this.fileRegistry.get(key);
-                    if (metadata) this.checkAndDownload(metadata);
+                    if (metadata) {
+                        this.pathHashCache.set(metadata.path, key);
+                        this.checkAndDownload(metadata);
+                    }
+                } else if (change.action === 'delete') {
+                    // If remote deleted it, we might want to update our cache?
+                    // But we don't know the path easily unless we search cache.
+                    // We can find by value in cache.
+                    for (const [p, h] of this.pathHashCache.entries()) {
+                        if (h === key) {
+                            this.pathHashCache.delete(p);
+                            break;
+                        }
+                    }
                 }
             });
         });
@@ -110,9 +131,14 @@ export class FileTransferService {
     }
 
     async handleFileRequest(hash: string, peerId: string, providerName: string) {
+        console.log(`[FileTransfer] Received request for hash ${hash} from ${peerId} via ${providerName}`);
+
         // 1. Find file metadata
         const metadata = this.fileRegistry.get(hash);
-        if (!metadata) return;
+        if (!metadata) {
+            console.log(`[FileTransfer] File not found in registry: ${hash}`);
+            return;
+        }
 
         // 2. Check if we have the file
         const file = this.app.vault.getAbstractFileByPath(metadata.path);
@@ -252,6 +278,60 @@ export class FileTransferService {
         } catch (e) {
             console.error(`[FileTransfer] Failed to process local file ${file.path}`, e);
         }
+    }
+
+    async handleLocalRename(file: TFile, oldPath: string) {
+        // Find old hash
+        const hash = this.pathHashCache.get(oldPath);
+        if (hash) {
+            this.pathHashCache.delete(oldPath);
+            this.handleLocalFile(file); // Registers new path
+
+            // Should we clean up the old path entry in registry?
+            // Since hash is same (content same), handleLocalFile updates the existing entry.
+            // But if we want to be safe:
+            // The verify logic in handleLocalFile will update the path.
+        } else {
+            // New file or missed
+            this.handleLocalFile(file);
+        }
+    }
+
+    async handleLocalDelete(file: TFile) {
+        // Find hash from path cache
+        const hash = this.pathHashCache.get(file.path);
+        if (hash) {
+            const metadata = this.fileRegistry.get(hash);
+            if (metadata) {
+                // Remove self from owners
+                const index = metadata.owners.indexOf(this.yjs.ydoc.clientID);
+                if (index > -1) {
+                    metadata.owners.splice(index, 1);
+                    if (metadata.owners.length === 0) {
+                        // Optional: remove entry entirely if no owners?
+                        // this.fileRegistry.delete(hash);
+                        // Keeping it might be useful for history? No, it wastes space.
+                        this.fileRegistry.delete(hash);
+                        console.log(`[FileTransfer] Removed file from registry: ${file.path} (${hash})`);
+                    } else {
+                        this.fileRegistry.set(hash, metadata);
+                        console.log(`[FileTransfer] Removed self as owner for: ${file.path} (${hash})`);
+                    }
+                }
+            }
+            this.pathHashCache.delete(file.path);
+        }
+    }
+
+    debugState() {
+        console.log('--- FileTransferService State ---');
+        console.log('Transfer Actions:', Object.keys(this.transferAction));
+        console.log('Pending Downloads:', Array.from(this.pendingDownloads));
+        //@ts-ignore
+        console.log('Registry Size:', this.fileRegistry.size);
+        //@ts-ignore
+        console.log('Registry Keys:', Array.from(this.fileRegistry.keys()));
+        // console.log('Registry Entries:', this.fileRegistry.toJSON()); // Careful with large registry
     }
 
     private async computeHash(buffer: ArrayBuffer): Promise<string> {

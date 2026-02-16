@@ -71,10 +71,27 @@ export default class P2PSyncPlugin extends Plugin {
 
         this.addCommand({ id: 'p2p-connect', name: 'Connect', callback: () => this.connect() });
         this.addCommand({ id: 'p2p-force-sync', name: 'Force Sync', callback: () => this.syncLocalToYjs() });
+        this.addCommand({
+            id: 'p2p-debug',
+            name: 'Debug State',
+            callback: () => {
+                this.fileTransferService.debugState();
+                console.log('--- Yjs State ---');
+                // @ts-ignore
+                console.log('Yjs ClientID:', this.yjsService.ydoc.clientID);
+                // @ts-ignore
+                console.log('Internet Peers:', Array.from(this.yjsService.internetClientIds));
+                // @ts-ignore
+                console.log('Local Peers:', Array.from(this.yjsService.localClientIds));
+                console.log('Connected Clients:', this.connectedClients);
+            }
+        });
 
         // File Watcher
         this.registerEvent(this.app.vault.on('modify', (file) => this.handleLocalModify(file)));
         this.registerEvent(this.app.vault.on('create', (file) => this.handleLocalModify(file)));
+        this.registerEvent(this.app.vault.on('rename', (file, oldPath) => this.handleLocalRename(file, oldPath)));
+        this.registerEvent(this.app.vault.on('delete', (file) => this.handleLocalDelete(file)));
 
         // Startup
         this.app.workspace.onLayoutReady(() => {
@@ -262,6 +279,22 @@ export default class P2PSyncPlugin extends Plugin {
         await this.saveData(this.settings);
         if (this.security) {
             await this.security.deriveKey(this.settings.secretKey);
+        }
+    }
+
+    async handleLocalRename(file: TAbstractFile, oldPath: string) {
+        if (!(file instanceof TFile)) return;
+        // this.logger.log(`Local file renamed: ${oldPath} -> ${file.path}`);
+        if (file.extension !== 'md') {
+            this.fileTransferService.handleLocalRename(file, oldPath);
+        }
+    }
+
+    async handleLocalDelete(file: TAbstractFile) {
+        if (!(file instanceof TFile)) return;
+        // this.logger.log(`Local file deleted: ${file.path}`);
+        if (file.extension !== 'md') {
+            this.fileTransferService.handleLocalDelete(file);
         }
     }
 
