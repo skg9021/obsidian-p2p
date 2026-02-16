@@ -97,7 +97,7 @@ const context = await esbuild.context({
             setup(build) {
                 // Use patched mqtt.js that passes credentials directly to mqtt.connect()
                 // instead of relying on URL credential parsing
-                const patchedPath = require('path').resolve('src/mqtt-patched.js');
+                const patchedPath = require('path').resolve('src/mqtt-patched.ts');
                 build.onResolve({ filter: /^trystero\/mqtt$/ }, () => {
                     return { path: patchedPath };
                 });
