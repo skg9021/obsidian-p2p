@@ -140,8 +140,15 @@ export class FileTransferService {
             return;
         }
 
+        console.log(`[FileTransfer] Request for ${metadata.name} (path: ${metadata.path})`);
+
         // 2. Check if we have the file
         const file = this.app.vault.getAbstractFileByPath(metadata.path);
+        if (!file) {
+            console.log(`[FileTransfer] File not found locally at path: ${metadata.path}`);
+            return;
+        }
+
         if (file instanceof TFile) {
             // 3. Read and stream
             try {
@@ -156,11 +163,15 @@ export class FileTransferService {
                     // So we just send the whole buffer!
 
                     // Sending metadata with the chunk helps identify which file it is.
-                    console.log(`[FileTransfer] Sent ${metadata.name} to ${peerId}`);
+                    console.log(`[FileTransfer] Sent ${metadata.name} to ${peerId} via ${providerName}`);
+                } else {
+                    console.log(`[FileTransfer] No actions available for provider ${providerName}`);
                 }
             } catch (e) {
                 console.error(`[FileTransfer] Failed to read ${metadata.path}`, e);
             }
+        } else {
+            console.log(`[FileTransfer] Path is not a TFile: ${metadata.path}`);
         }
     }
 
