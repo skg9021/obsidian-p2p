@@ -208,6 +208,12 @@ export default class P2PSyncPlugin extends Plugin {
                     this.scheduleReconnect(roomName);
                 }
             });
+        } else {
+            if (this.settings.enableLocalClient) {
+                this.logger.log(`Skipping local client connection: Server address is empty`);
+            } else {
+                this.logger.log(`Local client disabled`);
+            }
         }
 
         this.statusBarItem.setText('P2P: Connected');

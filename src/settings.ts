@@ -166,7 +166,8 @@ export class P2PSyncSettingTab extends PluginSettingTab {
                 .setValue(this.plugin.settings.enableLocalClient)
                 .onChange(async (value) => {
                     this.plugin.settings.enableLocalClient = value;
-                    await this.plugin.saveSettingsDebounced();
+                    await this.plugin.saveSettings(); // Save immediately
+                    await this.plugin.connect(); // Connect immediately
                     this.display();
                 }));
 
