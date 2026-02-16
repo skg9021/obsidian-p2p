@@ -271,6 +271,33 @@ export class P2PSyncSettingTab extends PluginSettingTab {
         // ─── Debug & Advanced ────────────────────────────────────
         containerEl.createEl('h3', { text: 'Debug & Advanced' });
 
+        // Client ID (Yjs awareness ID) — read-only
+        const clientId = this.plugin.yjsService?.ydoc?.clientID;
+        new Setting(containerEl)
+            .setName('Client ID')
+            .setDesc('Yjs awareness client ID (unique per session)')
+            .addText(text => {
+                text.setValue(clientId != null ? String(clientId) : 'N/A')
+                    .setDisabled(true);
+                text.inputEl.style.opacity = '0.7';
+            });
+
+        // Peer ID (WebRTC signaling ID) — read-only
+        let peerId = 'N/A';
+        try {
+            // selfId is only available when the mqtt-patched module is loaded
+            const { selfId } = require('trystero/mqtt');
+            if (selfId) peerId = selfId;
+        } catch { /* N/A */ }
+        new Setting(containerEl)
+            .setName('Peer ID')
+            .setDesc('WebRTC signaling peer ID (used for P2P discovery)')
+            .addText(text => {
+                text.setValue(peerId)
+                    .setDisabled(true);
+                text.inputEl.style.opacity = '0.7';
+            });
+
         new Setting(containerEl)
             .setName('Enable Debug Logs')
             .setDesc('Log verbose status messages to the developer console')
