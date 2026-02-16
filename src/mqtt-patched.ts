@@ -73,6 +73,9 @@ export const joinRoom = strategy({
             if (config.mqttUsername) {
                 connectOpts.username = config.mqttUsername;
                 connectOpts.password = config.mqttPassword || '';
+                connectOpts.reconnectPeriod = 5000;
+                connectOpts.reconnectOnConnackError = false;
+
             }
             console.log('[P2P mqtt-patched] mqtt.connect URL:', url, 'opts:', JSON.stringify(connectOpts));
             const client = mqtt.connect(url, connectOpts);
@@ -89,8 +92,12 @@ export const joinRoom = strategy({
                 })
                 .on('error', (err: Error) => {
                     // Ignore expected errors during cleanup
-                    if (err.message?.includes('disconnecting')) return;
+                    // if (err.message?.includes('disconnecting')) return;
                     console.error('[P2P mqtt-patched] MQTT error:', err);
+                })
+                .on('close', () => {
+                    console.log('[P2P mqtt-patched] MQTT closed');
+                    activeClients.delete(client);
                 });
 
             return new Promise<MqttClient>(res => client.on('connect', () => {
