@@ -66,33 +66,45 @@ export class FileTransferService {
         ];
 
         providers.forEach(({ name, provider }) => {
-            if (provider && provider.trystero && !this.transferAction[name]) {
-                const room = provider.trystero;
-                // Trystero action names must be <= 12 bytes
-                const [sendRequest, getRequest] = room.makeAction('f-req');
-                const [sendChunk, getChunk, onProgress] = room.makeAction('f-data');
-                const [sendComplete, getComplete] = room.makeAction('f-done');
+            if (provider && provider.trystero) {
+                if (!this.transferAction[name]) {
+                    try {
+                        const room = provider.trystero;
+                        // Trystero action names must be <= 12 bytes
+                        const [sendRequest, getRequest] = room.makeAction('f-req');
+                        const [sendChunk, getChunk, onProgress] = room.makeAction('f-data');
+                        const [sendComplete, getComplete] = room.makeAction('f-done');
 
-                this.transferAction[name] = { sendRequest, sendChunk, sendComplete };
+                        this.transferAction[name] = { sendRequest, sendChunk, sendComplete };
 
-                // Handle requests for files
-                getRequest(async (hash: string, peerId: string) => {
-                    this.handleFileRequest(hash, peerId, name);
-                });
+                        // Handle requests for files
+                        getRequest(async (hash: string, peerId: string) => {
+                            this.handleFileRequest(hash, peerId, name);
+                        });
 
-                // Handle incoming chunks
-                getChunk((data: Uint8Array, peerId: string, metadata: any) => {
-                    this.handleFileChunk(data, peerId, metadata);
-                });
+                        // Handle incoming chunks
+                        getChunk((data: Uint8Array, peerId: string, metadata: any) => {
+                            this.handleFileChunk(data, peerId, metadata);
+                        });
 
-                // Handle completion
-                getComplete((hash: string, peerId: string) => {
-                    // Verification?
-                });
+                        // Handle completion
+                        getComplete((hash: string, peerId: string) => {
+                            // Verification?
+                        });
 
-                console.log(`[FileTransfer] Setup actions for ${name} provider`);
-            } else if (!provider) {
-                delete this.transferAction[name];
+                        console.log(`[FileTransfer] Setup actions for ${name} provider`);
+                    } catch (e) {
+                        console.error(`[FileTransfer] Failed to setup actions for ${name}`, e);
+                    }
+                } else {
+                    // console.log(`[FileTransfer] Actions already setup for ${name}`);
+                }
+            } else {
+                // Provider is gone, cleanup actions
+                if (this.transferAction[name]) {
+                    delete this.transferAction[name];
+                    console.log(`[FileTransfer] Cleaned up actions for ${name} provider`);
+                }
             }
         });
     }

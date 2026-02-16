@@ -74,6 +74,7 @@ export default class P2PSyncPlugin extends Plugin {
 
         // File Watcher
         this.registerEvent(this.app.vault.on('modify', (file) => this.handleLocalModify(file)));
+        this.registerEvent(this.app.vault.on('create', (file) => this.handleLocalModify(file)));
 
         // Startup
         this.app.workspace.onLayoutReady(() => {
