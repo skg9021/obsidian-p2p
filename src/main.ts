@@ -4,6 +4,7 @@ import { P2PSettings, DEFAULT_SETTINGS, P2PSyncSettingTab } from './settings';
 import { YjsService, PeerInfo } from './services/yjs.service';
 import { LocalServerService } from './services/local-server.service';
 import { Logger } from './services/logger.service';
+import { FileTransferService } from './services/file-transfer.service';
 
 export default class P2PSyncPlugin extends Plugin {
     settings: P2PSettings;
@@ -13,6 +14,7 @@ export default class P2PSyncPlugin extends Plugin {
 
     yjsService: YjsService;
     localServerService: LocalServerService;
+    fileTransferService: FileTransferService;
 
     connectedClients: PeerInfo[] = [];
     settingsTab: P2PSyncSettingTab;
@@ -56,6 +58,10 @@ export default class P2PSyncPlugin extends Plugin {
         );
         this.logger.log('Local signaling server service initialized');
 
+        // Initialize File Transfer Service
+        this.fileTransferService = new FileTransferService(this.app, this.yjsService, this.settings);
+        this.logger.log('File Transfer service initialized');
+
         // UI & Commands
         this.settingsTab = new P2PSyncSettingTab(this.app, this);
         this.addSettingTab(this.settingsTab);
@@ -72,6 +78,7 @@ export default class P2PSyncPlugin extends Plugin {
         // Startup
         this.app.workspace.onLayoutReady(() => {
             this.logger.log('Layout ready, starting sync and connection');
+            this.fileTransferService.initialize();
             this.syncLocalToYjs();
             this.connect();
         });
@@ -87,8 +94,15 @@ export default class P2PSyncPlugin extends Plugin {
     }
 
     async handleLocalModify(file: TAbstractFile) {
-        this.logger.log(`Local file modified: ${file instanceof TFile ? file.path : 'non-file'}`);
-        this.yjsService.handleLocalModify(file);
+        if (!(file instanceof TFile)) return;
+        this.logger.log(`Local file modified: ${file.path}`);
+
+        if (file.extension === 'md') {
+            this.yjsService.handleLocalModify(file);
+        } else {
+            // It's a binary file (image, pdf, etc.)
+            this.fileTransferService.handleLocalFile(file);
+        }
     }
 
     async syncLocalToYjs() {
@@ -126,6 +140,10 @@ export default class P2PSyncPlugin extends Plugin {
                 this.yjsService.startTrysteroProvider(roomName, this.settings.secretKey, relayUrls, mqttCredentials);
                 this.statusBarItem.setText('P2P: Online');
                 this.logger.log(`Trystero provider started for room: ${roomName}`);
+
+                // Re-register file transfer actions when provider restarts
+                // (Though hooking into YjsService events would be cleaner, for now we can call setup)
+                this.fileTransferService.setupProviderActions();
             } catch (e) {
                 this.logger.error('Trystero Init Failed', e);
             }
@@ -143,6 +161,7 @@ export default class P2PSyncPlugin extends Plugin {
             const localSignalingUrl = `ws://localhost:${this.settings.localServerPort}`;
             this.yjsService.startLocalWebrtcProvider(localSignalingUrl, roomName, this.settings.secretKey);
             this.logger.log('Host: signaling server + local WebRTC provider started');
+            this.fileTransferService.setupProviderActions();
         }
 
         // ─── Local LAN: Connect to remote host's signaling server ─
@@ -165,6 +184,7 @@ export default class P2PSyncPlugin extends Plugin {
                     this.logger.log('Client: local WebRTC provider started');
                     // Re-emit peer list after reconnect
                     this.yjsService.refreshPeerList();
+                    this.fileTransferService.setupProviderActions();
                 } else {
                     this.logger.log(`Connection to ${this.settings.localServerAddress} failed. Scheduling reconnect...`);
                     this.scheduleReconnect(roomName);
@@ -229,6 +249,7 @@ export default class P2PSyncPlugin extends Plugin {
             const localSignalingUrl = `ws://localhost:${this.settings.localServerPort}`;
             this.yjsService.startLocalWebrtcProvider(localSignalingUrl, roomName, this.settings.secretKey);
             this.logger.log('Signaling server and local provider restarted');
+            this.fileTransferService.setupProviderActions();
         }
     }
 
