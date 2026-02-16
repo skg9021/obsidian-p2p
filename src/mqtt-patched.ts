@@ -69,11 +69,12 @@ export const closeAllClients = (): void => {
         // Also clean up module-level maps
         Object.keys(sockets).forEach(k => delete sockets[k]);
         Object.keys(msgHandlers).forEach(k => delete msgHandlers[k]);
-
-        // IMPORTANT: Reset the strategy instance so the next joinRoom call
-        // creates a new closure with fresh 'didInit' state.
-        resetStrategy();
     }
+
+    // IMPORTANT: Reset the strategy instance so the next joinRoom call
+    // creates a new closure with fresh 'didInit' state.
+    // This MUST run even if activeClients was empty (e.g. failed initial connection).
+    resetStrategy();
 };
 
 const createStrategy = () => strategy({
@@ -111,10 +112,10 @@ const createStrategy = () => strategy({
                     if (err.message?.includes('disconnecting')) return;
                     console.error('[P2P mqtt-patched] MQTT error check:', { msg: err.message, type: typeof err.message });
                     console.error('[P2P mqtt-patched] MQTT error:', err);
-                })
-                .on('close', () => {
-                    activeClients.delete(client);
                 });
+            // We REMOVED the .on('close') handler here.
+            // We want clients to stay in activeClients even if they momentarily disconnect,
+            // so that closeAllClients() can find them and kill them properly if they are in a reconnect loop.
 
             return new Promise<MqttClient>(res => client.on('connect', () => {
                 console.log('[P2P mqtt-patched] MQTT connected to', url);
