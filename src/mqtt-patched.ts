@@ -28,6 +28,9 @@ interface MqttConfig {
 
 type MessageHandler = (topic: string, data: string) => void;
 
+const instanceId = Math.random().toString(36).substring(7);
+console.log(`[P2P mqtt-patched] Module loaded, instanceId: ${instanceId}`);
+
 // ─── Module State ────────────────────────────────────────────
 
 const sockets: Record<string, unknown> = {};
@@ -51,11 +54,16 @@ export const closeAllClients = (): void => {
     if (activeClients.size > 0) {
         console.log(`[P2P mqtt-patched] Force-closing ${activeClients.size} active MQTT client(s)`);
         activeClients.forEach(c => {
+            const clientId = getClientId(c);
+            console.log(`[P2P mqtt-patched] Force-closing client ${clientId}`);
             try {
-                c.end(true, () => {
-                    console.log('[P2P mqtt-patched] MQTT closed: ', c);
+                c.end(true, {}, (err) => {
+                    if (err) console.error(`[P2P mqtt-patched] Error closing client ${clientId}:`, err);
+                    else console.log(`[P2P mqtt-patched] Client ${clientId} closed successfully.`);
                 });
-            } catch { /* ignore */ }
+            } catch (e) {
+                console.error(`[P2P mqtt-patched] Exception closing client ${clientId}:`, e);
+            }
         });
         activeClients.clear();
         // Also clean up module-level maps
@@ -85,13 +93,14 @@ export const joinRoom = strategy({
             const client = mqtt.connect(url, connectOpts);
             const clientId = getClientId(client);
 
+            console.log(`[P2P mqtt-patched] Created client ${clientId}, now tracking.`);
             activeClients.add(client);
             sockets[clientId] = (client as any).stream?.socket;
             msgHandlers[clientId] = {};
 
             client
                 .on('message', (topic: string, buffer: Buffer) => {
-                    console.log('[P2P mqtt-patched] MQTT message:', topic, buffer.toString());
+                    console.log(`[P2P mqtt-patched] Client ${clientId} received message on ${topic}:`, buffer.toString());
                     msgHandlers[clientId]?.[topic]?.(topic, buffer.toString());
                 })
                 .on('error', (err: Error) => {
@@ -130,6 +139,13 @@ export const joinRoom = strategy({
         // Cleanup: called by strategy.js when leaving room (deferred, may run late)
         return () => {
             console.log('[P2P mqtt-patched] Subscribe cleanup for', clientId);
+            if (!client.connected || (client as any).disconnecting) {
+                // Already disconnected/disconnecting, no need to unsubscribe
+                delete msgHandlers[clientId];
+                delete sockets[clientId];
+                activeClients.delete(client);
+                return;
+            }
             client.unsubscribe(rootTopic);
             client.unsubscribe(selfTopic);
             delete msgHandlers[clientId];
