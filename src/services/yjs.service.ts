@@ -172,7 +172,9 @@ export class YjsService {
             // Force-close MQTT clients BEFORE provider.destroy(), because
             // WebrtcProvider.destroy() defers room cleanup via this.key.then(),
             // so the normal subscribe cleanup runs too late.
-            closeAllClients();
+
+            // Adding this to revert to previous behavior
+            // closeAllClients();
             this.trysteroProvider.destroy();
             this.trysteroProvider = null;
             this.internetClientIds.clear();
