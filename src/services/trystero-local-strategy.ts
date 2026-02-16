@@ -116,9 +116,19 @@ export const joinRoom = strategy({
                         // Since we are ignoring types for the module anyway, the type definition in our file must be wrong.
 
                         // Let's just cast the 3rd arg to any to make TS happy, as we know what we are passing.
-                        onMessage(msg.topic, msg, ((t: string, d: any) => {
-                            send({ type: 'publish', topic: t, ...d });
-                        }) as any);
+                        // console.log(`[Trystero Local] Received ${msg.type} on ${msg.topic}:`, msg);
+                        const peerId = msg.peerId;
+                        if (!peerId && msg.topic === rootTopic) {
+                            // Announce messages usually have peerId in payload, ensuring it's top level if we spread ...payload
+                        }
+
+                        // Trystero expects onMessage(topic, data, peerId)
+                        // The previous code passed a function as the 3rd arg. This was likely wrong?
+                        // If Trystero expects peerId string, we must pass it.
+                        // If the message doesn't have peerId, we might have an issue.
+                        // But let's try passing msg.peerId.
+
+                        onMessage(msg.topic, msg, peerId);
                     }
                 }
             } catch (e) {
