@@ -19,33 +19,104 @@ export const joinRoom = strategy({
     init: (config: { appId: string, settings: P2PSettings }) => {
         return new Promise((resolve, reject) => {
             const { settings } = config;
-            // Determine signaling URL. If we are the host, we connect to localhost.
-            // If we are a client, we connect to the configured server IP.
-            // Actually, the settings should provide the full URL or IP/Port.
-            // For now, let's assume we pass the full websocket URL in config or derive it.
-
-            // In the context of the plugin, we probably want to determine the URL dynamically.
-            // But 'init' is called when we creaate the Trystero room.
-            // We can pass the URL in the 'appId' or a custom config field.
-            // Let's expect 'clientUrl' in config.
-
             const url = (config as any).clientUrl || `ws://localhost:${settings.localServerPort}`;
             console.log(`[Trystero Local] Connecting to ${url}`);
 
-            const ws = new WebSocket(url);
+            // Proxy object to mimic WebSocket but handle reconnection
+            const socketProxy = {
+                url: url,
+                readyState: 0 as number, // 0=CONNECTING, 1=OPEN, 2=CLOSING, 3=CLOSED
+                send: (data: any) => {
+                    if (internalWs && internalWs.readyState === 1) { // 1=OPEN
+                        internalWs.send(data);
+                    } else {
+                        // Queue or drop? For signaling, dropping might be okay as retries happen at higher level?
+                        // actually Trystero might expect reliable transport?
+                        // Let's just drop and hope for reconnection + re-announce.
+                        // console.warn('[Trystero Local] Send failed: Socket not open');
+                    }
+                },
+                close: () => {
+                    manualClose = true;
+                    if (internalWs) internalWs.close();
+                },
+                addEventListener: (type: string, listener: any) => {
+                    if (!listeners[type]) listeners[type] = [];
+                    listeners[type].push(listener);
+                },
+                removeEventListener: (type: string, listener: any) => {
+                    if (!listeners[type]) return;
+                    listeners[type] = listeners[type].filter((l: any) => l !== listener);
+                }
+            };
 
-            // Handle connection
-            ws.addEventListener('open', () => {
-                console.log('[Trystero Local] WebSocket connected');
-                resolve(ws);
-            });
+            const listeners: { [key: string]: any[] } = {};
+            let internalWs: WebSocket | null = null;
+            let manualClose = false;
+            let reconnectParams = { attempts: 0, delay: 1000, maxDelay: 10000 };
 
-            ws.addEventListener('error', (err) => {
-                console.error('[Trystero Local] WebSocket error', err);
-                // If we haven't resolved yet, reject? 
-                // Trystero strategies usually retry or handle this internally?
-                // For now, simple log.
-            });
+            const connect = () => {
+                if (manualClose) return;
+
+                try {
+                    internalWs = new WebSocket(url);
+                    socketProxy.readyState = 0; // CONNECTING
+
+                    internalWs.addEventListener('open', () => {
+                        console.log('[Trystero Local] WebSocket connected');
+                        socketProxy.readyState = 1; // OPEN
+                        reconnectParams.attempts = 0;
+                        reconnectParams.delay = 1000;
+
+                        // Notify listeners
+                        (listeners['open'] || []).forEach(l => l({}));
+                    });
+
+                    internalWs.addEventListener('message', (event) => {
+                        (listeners['message'] || []).forEach(l => l(event));
+                    });
+
+                    internalWs.addEventListener('close', () => {
+                        if (manualClose) return;
+                        socketProxy.readyState = 3; // CLOSED
+                        console.log('[Trystero Local] WebSocket closed. Reconnecting...');
+                        scheduleReconnect();
+                    });
+
+                    internalWs.addEventListener('error', (e) => {
+                        console.error('[Trystero Local] WebSocket error', e);
+                        // Error usually leads to close
+                    });
+
+                } catch (e) {
+                    console.error('[Trystero Local] Connection failed', e);
+                    scheduleReconnect();
+                }
+            };
+
+            const scheduleReconnect = () => {
+                if (manualClose) return;
+                const timeout = Math.min(reconnectParams.delay * Math.pow(1.5, reconnectParams.attempts), reconnectParams.maxDelay);
+                console.log(`[Trystero Local] Reconnecting in ${timeout}ms...`);
+                setTimeout(() => {
+                    reconnectParams.attempts++;
+                    connect();
+                }, timeout);
+            }
+
+            // Initial connect
+            connect();
+
+            // Resolve immediately with our proxy? 
+            // Trystero waits for resolution before using the socket.
+            // We should ideally wait for the first 'open' but to support transparent auto-reconnect,
+            // we return the proxy. Trystero attaches listeners to it.
+            // When real socket opens, we trigger 'open'.
+
+            // Wait, does Trystero wait for 'open' event? 
+            // Looking at source: `socket.addEventListener('open', ...)`
+            // So yes, returning proxy immediately is fine.
+            resolve(socketProxy);
         });
     },
 

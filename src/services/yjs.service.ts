@@ -110,13 +110,32 @@ export class YjsService {
             if (state && state.name) {
                 const inLocal = this.localClientIds.has(clientId);
                 const inInternet = this.internetClientIds.has(clientId);
-                const source: PeerInfo['source'] =
-                    (inLocal && inInternet) ? 'both' :
-                        inInternet ? 'internet' :
-                            inLocal ? 'local' :
-                                // Fallback: if we haven't seen this peer through either
-                                // provider yet, infer from which providers are active
-                                this.trysteroProvider ? 'internet' : 'local';
+
+                let source: PeerInfo['source'] = 'local'; // Default to local for safety? Or 'unknown'?
+
+                if (inLocal && inInternet) {
+                    source = 'both';
+                } else if (inInternet) {
+                    source = 'internet';
+                } else if (inLocal) {
+                    source = 'local';
+                } else {
+                    // Fallback inferencing
+                    if (this.trysteroProvider && !this.localWebrtcProvider) {
+                        source = 'internet';
+                    } else if (!this.trysteroProvider && this.localWebrtcProvider) {
+                        source = 'local';
+                    } else {
+                        // Both active, but awareness didn't tell us where it came from yet.
+                        // This happens on initial load sometimes. 
+                        // If we are here, it means we missed the 'update' event or origin was null.
+                        // Let's default to 'unknown' or just leave it.
+                        // But for UI sake, let's guess 'local' if we are in a purely local context?
+                        // No, let's mark it as local if we have no internet.
+                        source = 'local';
+                    }
+                }
+
                 peers.push({ name: state.name, ip: state.ip, clientId, source });
             }
         });
