@@ -179,6 +179,16 @@ export class FileTransferService {
             // Check if we are connected to this owner
             const providerName = this.yjs.getClientProvider(ownerId);
 
+            console.log(`[FileTransfer] Checking owner ${ownerId}. Provider: ${providerName}`);
+            if (!providerName) {
+                // Debug why provider is null
+                // We can't access private sets from here directly unless we cast to any or add public debug method
+                // But we can log what getClientProvider returned.
+                // Actually let's assume YjsService logs if we enable debug there.
+                // Or we can just log the raw sets if we change YjsService visibility... 
+                // keeping it simple for now.
+            }
+
             if (providerName && this.transferAction[providerName]) {
                 console.log(`[FileTransfer] Requesting ${metadata.name} from client ${ownerId} via ${providerName}`);
 

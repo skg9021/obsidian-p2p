@@ -54,7 +54,7 @@ export class YjsService {
 
         // Track which provider each peer's awareness came through.
         this.awareness.on('update', ({ added, removed }: any, origin: any) => {
-            const roomName = origin?.room?.name;
+            const roomName = origin?.name || origin?.room?.name;
             if (!roomName) return; // local change or non-WebRTC origin
             if (roomName.startsWith('mqtt-')) {
                 added?.forEach((id: number) => this.internetClientIds.add(id));
@@ -116,6 +116,8 @@ export class YjsService {
     getClientProvider(clientId: number): 'internet' | 'local' | null {
         if (this.localClientIds.has(clientId)) return 'local';
         if (this.internetClientIds.has(clientId)) return 'internet';
+
+        console.log(`[P2P Yjs] Client ${clientId} not found in providers. Local: [${Array.from(this.localClientIds)}], Internet: [${Array.from(this.internetClientIds)}]`);
         return null;
     }
 
