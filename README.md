@@ -12,9 +12,9 @@ This is a sample plugin for Obsidian (https://obsidian.md).
 
 ## Features
 
-- [ ] Fix MQTT based signalling
+- [X] Fix MQTT based signalling
 - [ ] Verify that both local and MQTT based signalling works at the same time.
-- [ ] Connected clients discovery should show which client is local and which client is on MQTT based signalling
+- [X] Connected clients discovery should show which client is local and which client is on MQTT based signalling
 - [ ] Decouple blob and images from y.js CRDT based sync. This can add significant overhead on y.js
 
 ## Improvements
