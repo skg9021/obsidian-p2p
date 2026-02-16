@@ -51,7 +51,11 @@ export const closeAllClients = (): void => {
     if (activeClients.size > 0) {
         console.log(`[P2P mqtt-patched] Force-closing ${activeClients.size} active MQTT client(s)`);
         activeClients.forEach(c => {
-            try { c.end(true); } catch { /* ignore */ }
+            try {
+                c.end(true, () => {
+                    console.log('[P2P mqtt-patched] MQTT closed: ', c);
+                });
+            } catch { /* ignore */ }
         });
         activeClients.clear();
         // Also clean up module-level maps

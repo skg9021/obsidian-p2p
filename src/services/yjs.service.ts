@@ -173,8 +173,7 @@ export class YjsService {
             // WebrtcProvider.destroy() defers room cleanup via this.key.then(),
             // so the normal subscribe cleanup runs too late.
 
-            // Adding this to revert to previous behavior
-            // closeAllClients();
+            closeAllClients();
             this.trysteroProvider.destroy();
             this.trysteroProvider = null;
             this.internetClientIds.clear();
