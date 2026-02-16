@@ -68,9 +68,10 @@ export class FileTransferService {
         providers.forEach(({ name, provider }) => {
             if (provider && provider.trystero && !this.transferAction[name]) {
                 const room = provider.trystero;
-                const [sendRequest, getRequest] = room.makeAction('file-request');
-                const [sendChunk, getChunk, onProgress] = room.makeAction('file-data');
-                const [sendComplete, getComplete] = room.makeAction('file-complete');
+                // Trystero action names must be <= 12 bytes
+                const [sendRequest, getRequest] = room.makeAction('f-req');
+                const [sendChunk, getChunk, onProgress] = room.makeAction('f-data');
+                const [sendComplete, getComplete] = room.makeAction('f-done');
 
                 this.transferAction[name] = { sendRequest, sendChunk, sendComplete };
 
