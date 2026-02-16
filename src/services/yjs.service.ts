@@ -201,11 +201,13 @@ export class YjsService {
                 {
                     appId: 'obsidian-p2p-local', // Identifier for the local app context
                     password: password || undefined,
-                    joinRoom: joinLocalRoom, // Inject our custom strategy
-                    // Pass the signaling URL to the strategy config
-                    // @ts-ignore - TrysteroProvider types might not show extra props but they are passed
-                    clientUrl: signalingUrl,
-                    settings: this.settings, // Pass settings if needed
+                    joinRoom: (config: any, roomId: string) => {
+                        return joinLocalRoom({
+                            ...config,
+                            clientUrl: signalingUrl,
+                            settings: this.settings
+                        }, roomId);
+                    },
                     awareness: this.awareness,
                     filterBcConns: false,
                     disableBc: true,
