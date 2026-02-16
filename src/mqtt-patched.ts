@@ -69,10 +69,14 @@ export const closeAllClients = (): void => {
         // Also clean up module-level maps
         Object.keys(sockets).forEach(k => delete sockets[k]);
         Object.keys(msgHandlers).forEach(k => delete msgHandlers[k]);
+
+        // IMPORTANT: Reset the strategy instance so the next joinRoom call
+        // creates a new closure with fresh 'didInit' state.
+        resetStrategy();
     }
 };
 
-export const joinRoom = strategy({
+const createStrategy = () => strategy({
     init: (config: MqttConfig): Promise<MqttClient>[] => {
         console.log('[P2P mqtt-patched] init called, config keys:', Object.keys(config));
         console.log('[P2P mqtt-patched] mqttUsername:', config.mqttUsername ? `"${config.mqttUsername}"` : '(not set)');
@@ -93,23 +97,22 @@ export const joinRoom = strategy({
             const client = mqtt.connect(url, connectOpts);
             const clientId = getClientId(client);
 
-            console.log(`[P2P mqtt-patched] Created client ${clientId}, now tracking.`);
             activeClients.add(client);
             sockets[clientId] = (client as any).stream?.socket;
             msgHandlers[clientId] = {};
 
             client
                 .on('message', (topic: string, buffer: Buffer) => {
-                    console.log(`[P2P mqtt-patched] Client ${clientId} received message on ${topic}:`, buffer.toString());
+                    console.log('[P2P mqtt-patched] MQTT message:', topic, buffer.toString());
                     msgHandlers[clientId]?.[topic]?.(topic, buffer.toString());
                 })
                 .on('error', (err: Error) => {
                     // Ignore expected errors during cleanup
-                    // if (err.message?.includes('disconnecting')) return;
+                    if (err.message?.includes('disconnecting')) return;
+                    console.error('[P2P mqtt-patched] MQTT error check:', { msg: err.message, type: typeof err.message });
                     console.error('[P2P mqtt-patched] MQTT error:', err);
                 })
                 .on('close', () => {
-                    console.log('[P2P mqtt-patched] MQTT closed');
                     activeClients.delete(client);
                 });
 
@@ -165,7 +168,14 @@ export const joinRoom = strategy({
 
         return (client: MqttClient, rootTopic: string): number => {
             announceCount++;
+            // SAFETY: Do not announce if we are already disconnecting
+            const isDisconnecting = (client as any).disconnecting;
+            if (!client.connected || isDisconnecting) {
+                console.log('[P2P mqtt-patched] Announce skipped (disconnecting or disconnected)');
+                return slowIntervalMs;
+            }
             try {
+                // console.log('[P2P mqtt-patched] Announce proceeding (connected:', client.connected, ')');
                 client.publish(rootTopic, toJson({ peerId: selfId }));
             } catch {
                 // Client may have been force-closed by closeAllClients()
@@ -177,6 +187,23 @@ export const joinRoom = strategy({
         };
     })()
 });
+
+let currentStrategy = createStrategy();
+
+/**
+ * Wrapper around the current strategy instance.
+ * Allows us to reset the strategy (clearing internal 'didInit' and 'initPromises' state)
+ * when we force-close clients.
+ */
+export const joinRoom = (...args: any[]) => {
+    // @ts-ignore
+    return currentStrategy(...args);
+};
+
+const resetStrategy = () => {
+    console.log('[P2P mqtt-patched] Resetting strategy instance');
+    currentStrategy = createStrategy();
+};
 
 export const getRelaySockets = (): Record<string, unknown> => ({ ...sockets });
 
