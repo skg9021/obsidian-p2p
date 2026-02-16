@@ -53,13 +53,30 @@ export class YjsService {
         });
 
         // Track which provider each peer's awareness came through.
+        // Track which provider each peer's awareness came through.
         this.awareness.on('update', ({ added, removed }: any, origin: any) => {
-            const roomName = origin?.name || origin?.room?.name;
-            if (!roomName) return; // local change or non-WebRTC origin
-            if (roomName.startsWith('mqtt-')) {
+            const roomName = origin?.roomName || origin?.room?.name;
+            // console.log(`[P2P Yjs] Awareness update from origin:`, origin); 
+            // The origin object structure might differ between providers.
+            // Let's log it to find out what property holds the name.
+            if (this.settings.enableDebugLogs) {
+                console.log(`[P2P Yjs] Awareness update. Origin:`, origin);
+                // console.log(`[P2P Yjs] Origin keys:`, origin ? Object.keys(origin) : 'null');
+                // console.log(`[P2P Yjs] Origin roomName: ${origin?.roomName}, room.name: ${origin?.room?.name}`);
+            }
+
+            // Fix: Check for roomName property directly as TrysteroProvider might use that?
+            // Or TrysteroProvider passes 'this' as origin.
+            // Let's try to be more robust.
+
+            const nameToUse = roomName || (origin && typeof origin === 'object' && origin.roomName);
+
+            if (!nameToUse) return; // local change or non-WebRTC origin
+
+            if (nameToUse.startsWith('mqtt-')) {
                 added?.forEach((id: number) => this.internetClientIds.add(id));
                 removed?.forEach((id: number) => this.internetClientIds.delete(id));
-            } else if (roomName.startsWith('lan-')) {
+            } else if (nameToUse.startsWith('lan-')) {
                 added?.forEach((id: number) => this.localClientIds.add(id));
                 removed?.forEach((id: number) => this.localClientIds.delete(id));
             }
