@@ -14,7 +14,13 @@ export interface PeerInfo {
     name: string;
     ip?: string;
     clientId: number;
-    source: 'local' | 'internet' | 'both';
+    source: 'local' | 'internet' | 'both' | 'unknown';
+}
+
+export interface PeerState {
+    name: string;
+    ip?: string;
+    [key: string]: any;
 }
 
 export class YjsService {
@@ -28,9 +34,8 @@ export class YjsService {
     /** Local LAN P2P provider (Trystero + Local Signaling) */
     localWebrtcProvider: any | null = null;
 
-    /** Track which awareness client IDs were learned through which provider */
-    private internetClientIds: Set<number> = new Set();
-    private localClientIds: Set<number> = new Set();
+    /** Track which providers (origins) each awareness client ID isn't connected through */
+    private peerOrigins: Map<number, Set<string>> = new Map();
 
     /** Callback when peer list changes */
     onPeersUpdated: (peers: PeerInfo[]) => void = () => { };
@@ -53,7 +58,6 @@ export class YjsService {
         });
 
         // Track which provider each peer's awareness came through.
-        // Track which provider each peer's awareness came through.
         this.awareness.on('update', ({ added, removed }: any, origin: any) => {
             const roomName = origin?.roomName || origin?.room?.name;
             // console.log(`[P2P Yjs] Awareness update from origin:`, origin); 
@@ -73,13 +77,20 @@ export class YjsService {
 
             if (!nameToUse) return; // local change or non-WebRTC origin
 
-            if (nameToUse.startsWith('mqtt-')) {
-                added?.forEach((id: number) => this.internetClientIds.add(id));
-                removed?.forEach((id: number) => this.internetClientIds.delete(id));
-            } else if (nameToUse.startsWith('lan-')) {
-                added?.forEach((id: number) => this.localClientIds.add(id));
-                removed?.forEach((id: number) => this.localClientIds.delete(id));
-            }
+            const updateOrigin = (clientId: number, action: 'add' | 'remove') => {
+                if (!this.peerOrigins.has(clientId)) this.peerOrigins.set(clientId, new Set());
+                const origins = this.peerOrigins.get(clientId)!;
+
+                if (action === 'add') {
+                    origins.add(nameToUse);
+                } else {
+                    origins.delete(nameToUse);
+                    if (origins.size === 0) this.peerOrigins.delete(clientId);
+                }
+            };
+
+            added?.forEach((id: number) => updateOrigin(id, 'add'));
+            removed?.forEach((id: number) => updateOrigin(id, 'remove'));
         });
 
         this.ydoc.on('update', (update: Uint8Array, origin: any) => {
@@ -108,33 +119,28 @@ export class YjsService {
         this.awareness.getStates().forEach((state: any, clientId: number) => {
             if (clientId === this.ydoc.clientID) return; // Skip self
             if (state && state.name) {
-                const inLocal = this.localClientIds.has(clientId);
-                const inInternet = this.internetClientIds.has(clientId);
+                const origins = this.peerOrigins.get(clientId) || new Set();
 
-                let source: PeerInfo['source'] = 'local'; // Default to local for safety? Or 'unknown'?
+                let isLocal = false;
+                let isInternet = false;
 
-                if (inLocal && inInternet) {
-                    source = 'both';
-                } else if (inInternet) {
-                    source = 'internet';
-                } else if (inLocal) {
-                    source = 'local';
-                } else {
-                    // Fallback inferencing
-                    if (this.trysteroProvider && !this.localWebrtcProvider) {
-                        source = 'internet';
-                    } else if (!this.trysteroProvider && this.localWebrtcProvider) {
-                        source = 'local';
-                    } else {
-                        // Both active, but awareness didn't tell us where it came from yet.
-                        // This happens on initial load sometimes. 
-                        // If we are here, it means we missed the 'update' event or origin was null.
-                        // Let's default to 'unknown' or just leave it.
-                        // But for UI sake, let's guess 'local' if we are in a purely local context?
-                        // No, let's mark it as local if we have no internet.
-                        source = 'local';
-                    }
+                // Check origins to determine type
+                for (const origin of origins) {
+                    if (origin.startsWith('lan-')) isLocal = true;
+                    if (origin.startsWith('mqtt-')) isInternet = true;
                 }
+
+                // Fallback inferencing if no origin recorded (e.g. missed update event)
+                if (!isLocal && !isInternet) {
+                    if (this.trysteroProvider && !this.localWebrtcProvider) isInternet = true;
+                    else if (!this.trysteroProvider && this.localWebrtcProvider) isLocal = true;
+                    else isLocal = true; // Default to local?
+                }
+
+                let source: PeerInfo['source'] = 'local';
+                if (isLocal && isInternet) source = 'both';
+                else if (isInternet) source = 'internet';
+                else source = 'unknown';
 
                 peers.push({ name: state.name, ip: state.ip, clientId, source });
             }
@@ -150,10 +156,20 @@ export class YjsService {
 
     /** Helper to determine the best provider for a given client ID */
     getClientProvider(clientId: number): 'internet' | 'local' | null {
-        if (this.localClientIds.has(clientId)) return 'local';
-        if (this.internetClientIds.has(clientId)) return 'internet';
+        const origins = this.peerOrigins.get(clientId);
+        if (!origins) {
+            console.log(`[P2P Yjs] Client ${clientId} has no recorded origins.`);
+            return null;
+        }
 
-        console.log(`[P2P Yjs] Client ${clientId} not found in providers. Local: [${Array.from(this.localClientIds)}], Internet: [${Array.from(this.internetClientIds)}]`);
+        // Prefer local
+        for (const origin of origins) {
+            if (origin.startsWith('lan-')) return 'local';
+        }
+        for (const origin of origins) {
+            if (origin.startsWith('mqtt-')) return 'internet';
+        }
+
         return null;
     }
 
@@ -211,12 +227,21 @@ export class YjsService {
 
     stopTrysteroProvider() {
         if (this.trysteroProvider) {
-            this.log('Stopping TrysteroProvider');
-            closeAllClients();
+            // @ts-ignore
+            closeAllClients(); // Close Trystero MQTT clients
             this.trysteroProvider.destroy();
             this.trysteroProvider = null;
-            this.internetClientIds.clear();
+            this.log('Trystero provider stopped');
         }
+
+        // Remove all MQTT origins
+        for (const [clientId, origins] of this.peerOrigins) {
+            const mqttOrigins = Array.from(origins).filter(o => o.startsWith('mqtt-'));
+            mqttOrigins.forEach(o => origins.delete(o));
+            if (origins.size === 0) this.peerOrigins.delete(clientId);
+        }
+
+        this.emitPeerList();
     }
 
     // ─── Local LAN P2P (Trystero via Local Signaling) ─────────
@@ -274,8 +299,17 @@ export class YjsService {
                 console.error('[P2P Yjs] Error stopping WebrtcProvider', e);
             }
             this.localWebrtcProvider = null;
-            this.localClientIds.clear();
+            this.log('Local WebRTC provider stopped');
         }
+
+        // Remove all LAN origins
+        for (const [clientId, origins] of this.peerOrigins) {
+            const lanOrigins = Array.from(origins).filter(o => o.startsWith('lan-'));
+            lanOrigins.forEach(o => origins.delete(o));
+            if (origins.size === 0) this.peerOrigins.delete(clientId);
+        }
+
+        this.emitPeerList();
     }
 
     // ─── Lifecycle ──────────────────────────────────────────────

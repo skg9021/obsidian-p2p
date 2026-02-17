@@ -80,9 +80,7 @@ export default class P2PSyncPlugin extends Plugin {
                 // @ts-ignore
                 console.log('Yjs ClientID:', this.yjsService.ydoc.clientID);
                 // @ts-ignore
-                console.log('Internet Peers:', Array.from(this.yjsService.internetClientIds));
-                // @ts-ignore
-                console.log('Local Peers:', Array.from(this.yjsService.localClientIds));
+                console.log('Peer Origins Map:', this.yjsService.peerOrigins);
                 console.log('Connected Clients:', this.connectedClients);
             }
         });

@@ -56,6 +56,7 @@ export class P2PSyncSettingTab extends PluginSettingTab {
         } else {
             const localPeers = peers.filter(p => p.source === 'local' || p.source === 'both');
             const internetPeers = peers.filter(p => p.source === 'internet' || p.source === 'both');
+            const unknownPeers = peers.filter(p => p.source === 'unknown');
 
             if (localPeers.length > 0) {
                 container.createEl('h4', { text: '🏠 Local Network' });
@@ -69,6 +70,14 @@ export class P2PSyncSettingTab extends PluginSettingTab {
                 container.createEl('h4', { text: '🌐 Internet (MQTT)' });
                 const ul = container.createEl('ul');
                 internetPeers.forEach(p => {
+                    ul.createEl('li', { text: p.ip ? `${p.name} — ${p.ip}` : p.name });
+                });
+            }
+
+            if (unknownPeers.length > 0) {
+                container.createEl('h4', { text: '❓ Unknown' });
+                const ul = container.createEl('ul');
+                unknownPeers.forEach(p => {
                     ul.createEl('li', { text: p.ip ? `${p.name} — ${p.ip}` : p.name });
                 });
             }
