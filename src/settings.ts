@@ -13,6 +13,7 @@ export interface P2PSettings {
     enableLocalClient: boolean;
     localServerAddress: string;
     enableDebugLogs: boolean;
+    debugLevel: 'info' | 'debug' | 'trace'; // Added logging level
     enableMqttDiscovery: boolean;
 }
 
@@ -28,6 +29,7 @@ export const DEFAULT_SETTINGS: P2PSettings = {
     enableLocalClient: false,
     localServerAddress: 'ws://localhost:8080',
     enableDebugLogs: false,
+    debugLevel: 'info', // Default level
     enableMqttDiscovery: false
 }
 
@@ -324,7 +326,23 @@ export class P2PSyncSettingTab extends PluginSettingTab {
                 .onChange(async (value) => {
                     this.plugin.settings.enableDebugLogs = value;
                     await this.plugin.saveSettingsDebounced();
+                    this.display(); // Re-render to show/hide level
                 }));
+
+        if (this.plugin.settings.enableDebugLogs) {
+            new Setting(containerEl)
+                .setName('Debug Level')
+                .setDesc('Control the verbosity of debug logs')
+                .addDropdown(dropdown => dropdown
+                    .addOption('info', 'Info (Basic)')
+                    .addOption('debug', 'Debug (Detailed)')
+                    .addOption('trace', 'Trace (Verbose)')
+                    .setValue(this.plugin.settings.debugLevel)
+                    .onChange(async (value: 'info' | 'debug' | 'trace') => {
+                        this.plugin.settings.debugLevel = value;
+                        await this.plugin.saveSettingsDebounced();
+                    }));
+        }
 
         new Setting(containerEl)
             .setName('Reconnect All')

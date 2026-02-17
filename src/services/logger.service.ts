@@ -3,9 +3,35 @@ import { P2PSettings } from '../settings';
 export class Logger {
     constructor(private settings: P2PSettings) { }
 
+    private shouldLog(level: 'info' | 'debug' | 'trace'): boolean {
+        if (!this.settings.enableDebugLogs) return false;
+
+        const levels = { 'info': 1, 'debug': 2, 'trace': 3 };
+        const currentLevel = levels[this.settings.debugLevel || 'info'];
+        const messageLevel = levels[level];
+
+        return currentLevel >= messageLevel;
+    }
+
     log(message: string, ...args: any[]) {
-        if (this.settings.enableDebugLogs) {
+        this.info(message, ...args);
+    }
+
+    info(message: string, ...args: any[]) {
+        if (this.shouldLog('info')) {
             console.log(`[P2P Sync] ${message}`, ...args);
+        }
+    }
+
+    debug(message: string, ...args: any[]) {
+        if (this.shouldLog('debug')) {
+            console.log(`[P2P Sync] [DEBUG] ${message}`, ...args);
+        }
+    }
+
+    trace(message: string, ...args: any[]) {
+        if (this.shouldLog('trace')) {
+            console.log(`[P2P Sync] [TRACE] ${message}`, ...args);
         }
     }
 
@@ -16,12 +42,6 @@ export class Logger {
     }
 
     error(message: string, ...args: any[]) {
-        // Errors should arguably always be logged, but adhering to the user request for "verbose logging when enabled", 
-        // we might want to log errors regardless? 
-        // Typically errors are critical. I will log errors always, but maybe prefix them.
-        // Actually, user said "Verbose logging should be done when enabled".
-        // Let's log errors always as they are critical for debugging even without verbose mode, 
-        // but normal 'log' only when enabled.
         console.error(`[P2P Sync] ${message}`, ...args);
     }
 }

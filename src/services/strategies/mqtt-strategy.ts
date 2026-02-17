@@ -7,6 +7,7 @@ import { PeerInfo } from '../p2p-types';
 import { TrysteroProvider } from '@winstonfassett/y-webrtc-trystero';
 // @ts-ignore
 import { joinRoom, closeAllClients } from 'trystero/mqtt';
+import { Logger } from '../logger.service';
 
 export class MqttStrategy implements ConnectionStrategy {
     id: StrategyId = 'mqtt';
@@ -15,10 +16,15 @@ export class MqttStrategy implements ConnectionStrategy {
     private doc: Y.Doc | null = null;
     private awareness: awarenessProtocol.Awareness | null = null;
     private provider: any | null = null;
+    private logger: Logger;
 
     // Track peers visible to THIS provider
     private myPeers: Map<number, any> = new Map();
     private peerUpdateCallback: ((peers: PeerInfo[]) => void) | null = null;
+
+    constructor(logger: Logger) {
+        this.logger = logger;
+    }
 
     initialize(doc: Y.Doc, awareness: awarenessProtocol.Awareness): void {
         this.doc = doc;
@@ -39,7 +45,7 @@ export class MqttStrategy implements ConnectionStrategy {
         }
 
         if (!settings.enableMqttDiscovery) {
-            console.log('[MqttStrategy] Disabled in settings. Skipping.');
+            this.logger.log('[MqttStrategy] Disabled in settings. Skipping.');
             return;
         }
 
@@ -95,7 +101,7 @@ export class MqttStrategy implements ConnectionStrategy {
             });
 
         } catch (e) {
-            console.error('[MqttStrategy] Failed to start TrysteroProvider', e);
+            this.logger.error('[MqttStrategy] Failed to start TrysteroProvider', e);
             throw e;
         }
     }
@@ -106,7 +112,7 @@ export class MqttStrategy implements ConnectionStrategy {
             closeAllClients(); // Close Trystero MQTT clients
             this.provider.destroy();
             this.provider = null;
-            console.log('[MqttStrategy] Disconnected');
+            this.logger.log('[MqttStrategy] Disconnected');
         }
 
         // Clear peers tracked by this strategy

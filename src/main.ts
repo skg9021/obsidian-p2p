@@ -49,11 +49,11 @@ export default class P2PSyncPlugin extends Plugin {
         };
 
         // Register Strategies
-        const mqttStrategy = new MqttStrategy();
+        const mqttStrategy = new MqttStrategy(this.logger);
         mqttStrategy.initialize(this.yjsService.ydoc, this.yjsService.awareness);
         this.yjsService.providerManager.registerStrategy(mqttStrategy);
 
-        const localStrategy = new LocalStrategy();
+        const localStrategy = new LocalStrategy(this.logger);
         localStrategy.initialize(this.yjsService.ydoc, this.yjsService.awareness);
         this.yjsService.providerManager.registerStrategy(localStrategy);
 

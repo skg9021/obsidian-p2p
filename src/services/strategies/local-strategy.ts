@@ -8,6 +8,7 @@ import { P2PSettings } from '../../settings'; // Needed for local strategy joinR
 // @ts-ignore
 import { TrysteroProvider } from '@winstonfassett/y-webrtc-trystero';
 import { joinRoom as joinLocalRoom } from '../trystero-local-strategy';
+import { Logger } from '../logger.service';
 
 export class LocalStrategy implements ConnectionStrategy {
     id: StrategyId = 'local';
@@ -16,10 +17,15 @@ export class LocalStrategy implements ConnectionStrategy {
     private doc: Y.Doc | null = null;
     private awareness: awarenessProtocol.Awareness | null = null;
     private provider: any | null = null;
+    private logger: Logger;
 
     // Track peers visible to THIS provider
     private myPeers: Map<number, any> = new Map();
     private peerUpdateCallback: ((peers: PeerInfo[]) => void) | null = null;
+
+    constructor(logger: Logger) {
+        this.logger = logger;
+    }
 
     initialize(doc: Y.Doc, awareness: awarenessProtocol.Awareness): void {
         this.doc = doc;
@@ -199,7 +205,7 @@ export class LocalStrategy implements ConnectionStrategy {
         let isFromMe = false;
 
         // Debug logging for awareness origin
-        console.log('[LocalStrategy] Awareness update:', { added, removed, origin });
+        this.logger?.debug('Awareness update:', { added, removed, origin });
 
         // Check origin logic similar to MqttStrategy
         if (origin === this.provider) {
@@ -208,7 +214,7 @@ export class LocalStrategy implements ConnectionStrategy {
             const originRoom = origin.roomName || origin.room?.name;
             const myRoom = this.provider?.roomName;
 
-            console.log(`[LocalStrategy] Origin check: originRoom=${originRoom}, myRoom=${myRoom}`);
+            this.logger?.trace(`Origin check: originRoom=${originRoom}, myRoom=${myRoom}`);
 
             if (originRoom && myRoom && myRoom === originRoom) {
                 isFromMe = true;
@@ -216,7 +222,7 @@ export class LocalStrategy implements ConnectionStrategy {
         }
 
         if (!isFromMe) {
-            console.log('[LocalStrategy] Ignoring awareness update from other origin');
+            this.logger?.trace('Ignoring awareness update from other origin');
             return;
         }
 
