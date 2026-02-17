@@ -81,12 +81,13 @@ export class FileTransferService {
 
     // Call this whenever YjsService starts a provider
     setupProviderActions() {
-        const providers = [
-            { name: 'internet', provider: this.yjs.trysteroProvider },
-            { name: 'local', provider: this.yjs.localWebrtcProvider }
-        ];
+        // Iterate over all strategies in manager
+        const strategies = this.yjs.providerManager.getStrategies();
 
-        providers.forEach(({ name, provider }) => {
+        strategies.forEach((strategy) => {
+            const provider = strategy.getUnderlyingProvider();
+            const name = strategy.id;
+
             if (provider && provider.trystero) {
                 if (!this.transferAction[name]) {
                     try {

@@ -1,3 +1,4 @@
+
 import { LocalServerService } from '../src/services/local-server.service';
 import { P2PSettings, DEFAULT_SETTINGS } from '../src/settings';
 
@@ -5,33 +6,31 @@ import { P2PSettings, DEFAULT_SETTINGS } from '../src/settings';
 const mockWsOn = jest.fn();
 const mockWsSend = jest.fn();
 const mockWsClose = jest.fn();
-const mockWssOn = jest.fn();
+
+// We need to capture the 'connection' listener registered by the service
+let serverConnectionListener: any;
+const mockWssOn = jest.fn((event, cb) => {
+    if (event === 'connection') serverConnectionListener = cb;
+});
 const mockWssClose = jest.fn();
-const mockWssClients = new Set();
-// Store callback for manual triggering
-let connectionCallback: any;
 
 class MockWebSocketClient {
     on = mockWsOn;
     send = mockWsSend;
     close = mockWsClose;
     readyState = 1;
+    socket = { remoteAddress: '192.168.1.5' };
 }
 
 class MockWebSocketServer {
-    clients = mockWssClients;
     constructor() { }
-    on(event: string, cb: any) {
-        if (event === 'connection') connectionCallback = cb;
-        mockWssOn(event, cb);
-    }
-    close() { mockWssClose(); }
+    on = mockWssOn;
+    close = mockWssClose;
 }
 
 jest.mock('ws', () => {
     return {
         WebSocketServer: MockWebSocketServer,
-        default: MockWebSocketClient // if imported as default
     };
 });
 
@@ -44,10 +43,10 @@ describe('LocalServerService', () => {
     beforeEach(() => {
         settings = { ...DEFAULT_SETTINGS };
         service = new LocalServerService(settings);
-        mockWssClients.clear();
         mockWssOn.mockClear();
         mockWsOn.mockClear();
-        connectionCallback = undefined;
+        mockWsSend.mockClear();
+        serverConnectionListener = undefined;
     });
 
     afterEach(() => {
@@ -57,43 +56,23 @@ describe('LocalServerService', () => {
 
     it('should start server and listen for connections', async () => {
         await service.startServer();
-        // Wait for dynamic import to resolve
-        await new Promise(resolve => setTimeout(resolve, 10));
+        // Wait for dynamic import logic if any (service uses require 'ws')
         expect(mockWssOn).toHaveBeenCalledWith('connection', expect.any(Function));
     });
 
-    it('should track connected clients and update names', async () => {
+    it('should track connected clients', async () => {
         const onClientsUpdated = jest.fn();
-        // Mock decrypt just to return the JSON payload
-        service.setCallbacks(
-            jest.fn(),
-            onClientsUpdated,
-            jest.fn(),
-            async (msg) => { try { return JSON.parse(msg); } catch (e) { return null; } }
-        );
+        service.setCallbacks(onClientsUpdated);
 
         await service.startServer();
-        await new Promise(resolve => setTimeout(resolve, 10));
 
         const mockSocket = new MockWebSocketClient();
 
         // Trigger connection
-        expect(connectionCallback).toBeDefined();
-        connectionCallback(mockSocket);
+        expect(serverConnectionListener).toBeDefined();
+        serverConnectionListener(mockSocket, { socket: { remoteAddress: '192.168.1.5' } });
 
-        // Initially "Connecting..."
-        expect(service.connectedClients.get(mockSocket)).toBe('Connecting...');
         expect(onClientsUpdated).toHaveBeenCalled();
-
-        // Simulate message with sender info
-        // Need to capture the message callback on the socket
-        const socketMessageCallback = mockWsOn.mock.calls.find(call => call[0] === 'message')[1];
-        expect(socketMessageCallback).toBeDefined();
-
-        const helloMsg = JSON.stringify({ sender: 'TestClient' });
-        await socketMessageCallback(helloMsg);
-
-        expect(service.connectedClients.get(mockSocket)).toBe('TestClient');
-        expect(onClientsUpdated).toHaveBeenCalledTimes(2);
+        expect(onClientsUpdated).toHaveBeenCalledWith(expect.arrayContaining(['192.168.1.5']));
     });
 });

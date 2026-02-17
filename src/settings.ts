@@ -125,6 +125,7 @@ export class P2PSyncSettingTab extends PluginSettingTab {
                 .onChange(async (value) => {
                     this.plugin.settings.enableLocalServer = value;
                     await this.plugin.saveSettingsDebounced();
+                    this.plugin.reloadLocalStrategy();
                     this.display();
                 }));
 
@@ -145,6 +146,7 @@ export class P2PSyncSettingTab extends PluginSettingTab {
                     .onChange(async (value) => {
                         this.plugin.settings.localServerPort = Number(value);
                         await this.plugin.saveSettingsDebounced();
+                        this.plugin.reloadLocalStrategy();
                     }));
 
             const ipSetting = new Setting(containerEl)
@@ -162,7 +164,7 @@ export class P2PSyncSettingTab extends PluginSettingTab {
                 .addButton(button => button
                     .setButtonText('Restart')
                     .onClick(() => {
-                        this.plugin.restartLocalServer();
+                        this.plugin.reloadLocalStrategy();
                         new Notice('Local Server Restarted');
                     }));
         }
@@ -176,7 +178,7 @@ export class P2PSyncSettingTab extends PluginSettingTab {
                 .onChange(async (value) => {
                     this.plugin.settings.enableLocalClient = value;
                     await this.plugin.saveSettings(); // Save immediately
-                    await this.plugin.connect(); // Connect immediately
+                    await this.plugin.reloadLocalStrategy(); // Connect immediately
                     this.display();
                 }));
 
@@ -190,6 +192,7 @@ export class P2PSyncSettingTab extends PluginSettingTab {
                     .onChange(async (value) => {
                         this.plugin.settings.localServerAddress = value;
                         await this.plugin.saveSettingsDebounced();
+                        this.plugin.reloadLocalStrategy();
                     }));
         }
 
@@ -204,9 +207,11 @@ export class P2PSyncSettingTab extends PluginSettingTab {
                 .onChange(async (value) => {
                     this.plugin.settings.enableMqttDiscovery = value;
                     await this.plugin.saveSettings();
-                    this.plugin.disconnect();
+                    // this.plugin.disconnect(); // Don't disconnect everyone!
                     if (value) {
-                        await this.plugin.connect();
+                        await this.plugin.reloadMqttStrategy();
+                    } else {
+                        this.plugin.yjsService.providerManager.disconnectStrategy('mqtt');
                     }
                     this.display();
                 }));
@@ -221,6 +226,7 @@ export class P2PSyncSettingTab extends PluginSettingTab {
                     .onChange(async (value) => {
                         this.plugin.settings.discoveryServer = value;
                         await this.plugin.saveSettingsDebounced();
+                        this.plugin.reloadMqttStrategy();
                     }));
 
             new Setting(containerEl)
@@ -232,6 +238,7 @@ export class P2PSyncSettingTab extends PluginSettingTab {
                     .onChange(async (value) => {
                         this.plugin.settings.mqttUsername = value;
                         await this.plugin.saveSettingsDebounced();
+                        this.plugin.reloadMqttStrategy();
                     }));
 
             new Setting(containerEl)
@@ -244,6 +251,7 @@ export class P2PSyncSettingTab extends PluginSettingTab {
                         .onChange(async (value) => {
                             this.plugin.settings.mqttPassword = value;
                             await this.plugin.saveSettingsDebounced();
+                            this.plugin.reloadMqttStrategy();
                         });
                 });
 
@@ -256,7 +264,7 @@ export class P2PSyncSettingTab extends PluginSettingTab {
                     .onClick(async () => {
                         button.setButtonText('Connecting...');
                         button.setDisabled(true);
-                        await this.plugin.connect();
+                        await this.plugin.reloadMqttStrategy();
                         button.setButtonText('Connect');
                         button.setDisabled(false);
                     }));

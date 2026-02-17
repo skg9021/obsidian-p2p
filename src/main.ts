@@ -1,7 +1,10 @@
 import { Plugin, App, TFile, Notice, TAbstractFile, Platform, debounce } from 'obsidian';
 import { SecurityService } from './security';
 import { P2PSettings, DEFAULT_SETTINGS, P2PSyncSettingTab } from './settings';
-import { YjsService, PeerInfo } from './services/yjs.service';
+import { YjsService } from './services/yjs.service';
+import { PeerInfo } from './services/p2p-types';
+import { MqttStrategy } from './services/strategies/mqtt-strategy';
+import { LocalStrategy } from './services/strategies/local-strategy';
 import { LocalServerService } from './services/local-server.service';
 import { Logger } from './services/logger.service';
 import { FileTransferService } from './services/file-transfer.service';
@@ -44,6 +47,16 @@ export default class P2PSyncPlugin extends Plugin {
             this.connectedClients = peers;
             if (this.settingsTab) this.settingsTab.updatePeerList();
         };
+
+        // Register Strategies
+        const mqttStrategy = new MqttStrategy();
+        mqttStrategy.initialize(this.yjsService.ydoc, this.yjsService.awareness);
+        this.yjsService.providerManager.registerStrategy(mqttStrategy);
+
+        const localStrategy = new LocalStrategy();
+        localStrategy.initialize(this.yjsService.ydoc, this.yjsService.awareness);
+        this.yjsService.providerManager.registerStrategy(localStrategy);
+
         // Set our local IPs in awareness
         this.localServerService = new LocalServerService(this.settings);
         this.localServerService.getLocalIPs().then(ips => {
@@ -80,7 +93,8 @@ export default class P2PSyncPlugin extends Plugin {
                 // @ts-ignore
                 console.log('Yjs ClientID:', this.yjsService.ydoc.clientID);
                 // @ts-ignore
-                console.log('Peer Origins Map:', this.yjsService.peerOrigins);
+                console.log('Provider Strategies:', this.yjsService.providerManager.strategies);
+                console.log('Aggregated Peers:', this.yjsService.providerManager.getPeers());
                 console.log('Connected Clients:', this.connectedClients);
             }
         });
@@ -133,90 +147,36 @@ export default class P2PSyncPlugin extends Plugin {
         this.disconnect();
         this.statusBarItem.setText('P2P: Connecting...');
 
-        // Derive a room name from the secret key
-        const roomHash = await this.security.hashString(this.settings.secretKey);
-        const roomName = `obsidian-p2p-${roomHash.substring(0, 16)}`;
+        const roomName = await this.getRoomName();
 
-        // ─── Internet P2P (Trystero + MQTT signaling) ───────────
-        if (this.settings.enableMqttDiscovery) {
-            this.logger.log('Starting Trystero provider (MQTT signaling)...');
-            try {
-                // Build relay URLs from discoveryServer setting
-                const relayUrls = this.settings.discoveryServer
-                    ? [this.settings.discoveryServer]
-                    : undefined;
-
-                // Pass credentials directly to mqtt.connect() via our patched mqtt.js
-                // (bypasses URL credential parsing which doesn't work in Electron)
-                const mqttCredentials = this.settings.mqttUsername
-                    ? { username: this.settings.mqttUsername, password: this.settings.mqttPassword || '' }
-                    : undefined;
-
-                this.logger.log(`MQTT broker: ${this.settings.discoveryServer || 'defaults'}, auth: ${mqttCredentials ? 'yes' : 'no'}`);
-                this.yjsService.startTrysteroProvider(roomName, this.settings.secretKey, relayUrls, mqttCredentials);
-                this.statusBarItem.setText('P2P: Online');
-                this.logger.log(`Trystero provider started for room: ${roomName}`);
-
-                // Re-register file transfer actions when provider restarts
-                // (Though hooking into YjsService events would be cleaner, for now we can call setup)
-                this.fileTransferService.setupProviderActions();
-            } catch (e) {
-                this.logger.error('Trystero Init Failed', e);
-            }
-        } else {
-            this.logger.log('MQTT Discovery disabled');
-        }
-
-        // ─── Local LAN: Start signaling server (Host Mode) ─────
-        // Mobile apps cannot host a WebSocket server (requires Node.js 'ws' module and open ports)
+        // ─── Start Local Server if needed ───
         if (!Platform.isMobile && this.settings.enableLocalServer) {
             this.logger.log(`Starting local signaling server on port ${this.settings.localServerPort}...`);
-            await this.localServerService.startServer();
-
-            // Also connect as a local peer via our own signaling server
-            const localSignalingUrl = `ws://localhost:${this.settings.localServerPort}`;
-            this.yjsService.startLocalWebrtcProvider(localSignalingUrl, roomName, this.settings.secretKey);
-            this.logger.log('Host: signaling server + local WebRTC provider started');
-            this.fileTransferService.setupProviderActions();
+            try {
+                await this.localServerService.startServer();
+                this.logger.log(`Signaling server started`);
+            } catch (e) {
+                this.logger.error('Failed to start signaling server', e);
+            }
         }
 
-        // ─── Local LAN: Connect to remote host's signaling server ─
-        if (this.settings.enableLocalClient && this.settings.localServerAddress) {
-            // Cancel any pending reconnects since we are starting fresh
-            if (this.clientReconnectTimeout) {
-                clearTimeout(this.clientReconnectTimeout);
-                this.clientReconnectTimeout = null;
-            }
+        // ─── Connect Strategies ───
+        await this.yjsService.providerManager.connectAll(roomName, this.settings);
 
-            this.checkConnection(this.settings.localServerAddress).then(canConnect => {
-                if (canConnect) {
-                    this.logger.log(`Connection to ${this.settings.localServerAddress} successful.`);
-                    this.clientReconnectAttempts = 0;
-                    this.yjsService.startLocalWebrtcProvider(
-                        this.settings.localServerAddress,
-                        roomName,
-                        this.settings.secretKey
-                    );
-                    this.logger.log('Client: local WebRTC provider started');
-                    // Re-emit peer list after reconnect
-                    this.yjsService.refreshPeerList();
-                    this.fileTransferService.setupProviderActions();
-                } else {
-                    this.logger.log(`Connection to ${this.settings.localServerAddress} failed. Scheduling reconnect...`);
+        // ─── Client Reconnect Logic ───
+        if (this.settings.enableLocalClient && this.settings.localServerAddress) {
+            this.checkConnection(this.settings.localServerAddress).then((canConnect) => {
+                if (!canConnect) {
+                    this.logger.log(`Connection check to ${this.settings.localServerAddress} failed. Scheduling reconnect...`);
                     this.scheduleReconnect(roomName);
+                } else {
+                    this.clientReconnectAttempts = 0;
                 }
             });
-        } else {
-            if (this.settings.enableLocalClient) {
-                this.logger.log(`Skipping local client connection: Server address is empty`);
-            } else {
-                this.logger.log(`Local client disabled`);
-            }
         }
 
-        this.statusBarItem.setText('P2P: Connected');
-        // Re-emit peer list after reconnect (awareness 'change' only fires on
-        // actual state changes, so if the same peers reconnect the list wouldn't update)
+        this.statusBarItem.setText('P2P: Online');
+        this.fileTransferService.setupProviderActions();
         this.yjsService.refreshPeerList();
         this.logger.log('--- connect() complete ---');
     }
@@ -252,27 +212,9 @@ export default class P2PSyncPlugin extends Plugin {
             this.clientReconnectTimeout = null;
         }
         this.logger.log('--- disconnect() called ---');
-        this.yjsService.stopTrysteroProvider();
-        this.yjsService.stopLocalWebrtcProvider();
+        this.yjsService.providerManager.disconnectAll();
         this.localServerService.stopServer();
         this.logger.log('All services disconnected');
-    }
-
-    async restartLocalServer() {
-        this.logger.log('--- restartLocalServer() called ---');
-        this.localServerService.stopServer();
-        this.yjsService.stopLocalWebrtcProvider();
-        if (!Platform.isMobile && this.settings.enableLocalServer) {
-            this.logger.log(`Restarting signaling server on port ${this.settings.localServerPort}...`);
-            await this.localServerService.startServer();
-
-            const roomHash = await this.security.hashString(this.settings.secretKey);
-            const roomName = `obsidian-p2p-${roomHash.substring(0, 16)}`;
-            const localSignalingUrl = `ws://localhost:${this.settings.localServerPort}`;
-            this.yjsService.startLocalWebrtcProvider(localSignalingUrl, roomName, this.settings.secretKey);
-            this.logger.log('Signaling server and local provider restarted');
-            this.fileTransferService.setupProviderActions();
-        }
     }
 
     async loadSettings() {
@@ -300,6 +242,58 @@ export default class P2PSyncPlugin extends Plugin {
         if (file.extension !== 'md') {
             this.fileTransferService.handleLocalDelete(file);
         }
+    }
+
+    async getRoomName(): Promise<string> {
+        const roomHash = await this.security.hashString(this.settings.secretKey);
+        return `obsidian-p2p-${roomHash.substring(0, 16)}`;
+    }
+
+    async reloadMqttStrategy() {
+        this.logger.log('--- reloadMqttStrategy() called ---');
+        const roomName = await this.getRoomName();
+        await this.yjsService.providerManager.connectStrategy('mqtt', roomName, this.settings);
+        this.fileTransferService.setupProviderActions();
+        this.yjsService.refreshPeerList();
+    }
+
+    async reloadLocalStrategy() {
+        this.logger.log('--- reloadLocalStrategy() called ---');
+
+        // Stop server if it's running
+        this.localServerService.stopServer();
+        this.yjsService.providerManager.disconnectStrategy('local');
+
+        const roomName = await this.getRoomName();
+
+        // Restart Server if enabled
+        if (!Platform.isMobile && this.settings.enableLocalServer) {
+            this.logger.log(`Starting local signaling server on port ${this.settings.localServerPort}...`);
+            try {
+                await this.localServerService.startServer();
+                this.logger.log(`Signaling server started`);
+            } catch (e) {
+                this.logger.error('Failed to start signaling server', e);
+            }
+        }
+
+        // Restart Strategy (Client/Host logic is internal to strategy)
+        await this.yjsService.providerManager.connectStrategy('local', roomName, this.settings);
+
+        // Client Reconnect Checks (UI feedback)
+        if (this.settings.enableLocalClient && this.settings.localServerAddress) {
+            this.checkConnection(this.settings.localServerAddress).then((canConnect) => {
+                if (!canConnect) {
+                    this.logger.log(`Connection check to ${this.settings.localServerAddress} failed. Scheduling reconnect...`);
+                    this.scheduleReconnect(roomName);
+                } else {
+                    this.clientReconnectAttempts = 0;
+                }
+            });
+        }
+
+        this.fileTransferService.setupProviderActions();
+        this.yjsService.refreshPeerList();
     }
 
     async getLocalIPs() {

@@ -9,19 +9,12 @@ import { WebrtcProvider } from 'y-webrtc';
 import * as awarenessProtocol from 'y-protocols/awareness';
 import { P2PSettings } from '../settings';
 import { joinRoom as joinLocalRoom } from './trystero-local-strategy';
+import { ProviderManager } from './provider-manager.service';
+import { PeerInfo } from './p2p-types';
 
-export interface PeerInfo {
-    name: string;
-    ip?: string;
-    clientId: number;
-    source: 'local' | 'internet' | 'both' | 'unknown';
-}
 
-export interface PeerState {
-    name: string;
-    ip?: string;
-    [key: string]: any;
-}
+
+
 
 export class YjsService {
     ydoc: Y.Doc;
@@ -29,13 +22,8 @@ export class YjsService {
     awareness: awarenessProtocol.Awareness;
     isRemoteUpdate: boolean = false;
 
-    /** Internet P2P provider (Trystero + MQTT signaling) */
-    trysteroProvider: any | null = null;
-    /** Local LAN P2P provider (Trystero + Local Signaling) */
-    localWebrtcProvider: any | null = null;
-
-    /** Track which providers (origins) each awareness client ID isn't connected through */
-    private peerOrigins: Map<number, Set<string>> = new Map();
+    /** Provider Manager handling strategies */
+    providerManager: ProviderManager;
 
     /** Callback when peer list changes */
     onPeersUpdated: (peers: PeerInfo[]) => void = () => { };
@@ -44,7 +32,7 @@ export class YjsService {
         this.ydoc = new Y.Doc();
         this.yMap = this.ydoc.getMap('obsidian-vault');
 
-        // Shared awareness instance — used by both providers
+        // Shared awareness instance — used by strategies
         this.awareness = new awarenessProtocol.Awareness(this.ydoc);
 
         // Set our own device name in awareness
@@ -52,50 +40,12 @@ export class YjsService {
             name: this.settings.deviceName,
         });
 
-        // Listen for awareness changes to track peers
-        this.awareness.on('change', () => {
-            this.emitPeerList();
-        });
-
-        // Track which provider each peer's awareness came through.
-        this.awareness.on('update', ({ added, removed }: any, origin: any) => {
-            try {
-                const roomName = origin?.roomName || origin?.room?.name;
-                // console.log(`[P2P Yjs] Awareness update from origin:`, origin); 
-                // The origin object structure might differ between providers.
-                // Let's log it to find out what property holds the name.
-                if (this.settings.enableDebugLogs) {
-                    console.log(`[P2P Yjs] Awareness update. Origin:`, origin);
-                    // console.log(`[P2P Yjs] Origin keys:`, origin ? Object.keys(origin) : 'null');
-                    // console.log(`[P2P Yjs] Origin roomName: ${origin?.roomName}, room.name: ${origin?.room?.name}`);
-                }
-
-                // Fix: Check for roomName property directly as TrysteroProvider might use that?
-                // Or TrysteroProvider passes 'this' as origin.
-                // Let's try to be more robust.
-
-                const nameToUse = roomName || (origin && typeof origin === 'object' && origin.roomName);
-
-                if (!nameToUse) return; // local change or non-WebRTC origin
-
-                const updateOrigin = (clientId: number, action: 'add' | 'remove') => {
-                    if (!this.peerOrigins.has(clientId)) this.peerOrigins.set(clientId, new Set());
-                    const origins = this.peerOrigins.get(clientId)!;
-
-                    if (action === 'add') {
-                        origins.add(nameToUse);
-                    } else {
-                        origins.delete(nameToUse);
-                        if (origins.size === 0) this.peerOrigins.delete(clientId);
-                    }
-                };
-
-                added?.forEach((id: number) => updateOrigin(id, 'add'));
-                removed?.forEach((id: number) => updateOrigin(id, 'remove'));
-            } catch (e) {
-                console.error('[P2P Yjs] Error handling awareness update', e);
-            }
-        });
+        // Initialize Provider Manager
+        this.providerManager = new ProviderManager();
+        this.providerManager.onPeersUpdated = (peers) => {
+            this.log(`Peers updated: [${peers.map(p => `${p.name}(${p.source})`).join(', ')}]`);
+            this.onPeersUpdated(peers);
+        };
 
         this.ydoc.on('update', (update: Uint8Array, origin: any) => {
             if (origin !== 'local') {
@@ -117,211 +67,33 @@ export class YjsService {
         });
     }
 
-    /** Collect all peers from awareness and notify via callback */
-    private emitPeerList() {
-        const peers: PeerInfo[] = [];
-        this.awareness.getStates().forEach((state: any, clientId: number) => {
-            if (clientId === this.ydoc.clientID) return; // Skip self
-            if (state && state.name) {
-                const origins = this.peerOrigins.get(clientId) || new Set();
-
-                let isLocal = false;
-                let isInternet = false;
-
-                // Check origins to determine type
-                for (const origin of origins) {
-                    if (origin.startsWith('lan-')) isLocal = true;
-                    if (origin.startsWith('mqtt-')) isInternet = true;
-                }
-
-                // Fallback inferencing if no origin recorded (e.g. missed update event)
-                if (!isLocal && !isInternet) {
-                    if (this.trysteroProvider && !this.localWebrtcProvider) isInternet = true;
-                    else if (!this.trysteroProvider && this.localWebrtcProvider) isLocal = true;
-                    else isLocal = true; // Default to local?
-                }
-
-                let source: PeerInfo['source'] = 'local';
-                if (isLocal && isInternet) source = 'both';
-                else if (isInternet) source = 'internet';
-                else if (isLocal) source = 'local';
-                else source = 'unknown';
-
-                peers.push({ name: state.name, ip: state.ip, clientId, source });
-            }
-        });
-        this.log(`Peers updated: [${peers.map(p => `${p.name}(${p.source})`).join(', ')}]`);
+    /** Public method to re-emit the current peer list (e.g. after reconnect) */
+    refreshPeerList() {
+        // Trigger manual emit from manager
+        const peers = this.providerManager.getPeers();
         this.onPeersUpdated(peers);
     }
 
-    /** Public method to re-emit the current peer list (e.g. after reconnect) */
-    refreshPeerList() {
-        this.emitPeerList();
-    }
-
-    /** Helper to determine the best provider for a given client ID */
+    /** 
+     * Helper to determine the best provider for a given client ID 
+     * (Delegated to Provider Mananger's source info)
+     */
     getClientProvider(clientId: number): 'internet' | 'local' | null {
-        const origins = this.peerOrigins.get(clientId);
-        if (!origins) {
-            console.log(`[P2P Yjs] Client ${clientId} has no recorded origins.`);
-            return null;
-        }
+        const peers = this.providerManager.getPeers();
+        const peer = peers.find(p => p.clientId === clientId);
+        if (!peer) return null;
 
-        // Prefer local
-        for (const origin of origins) {
-            if (origin.startsWith('lan-')) return 'local';
-        }
-        for (const origin of origins) {
-            if (origin.startsWith('mqtt-')) return 'internet';
-        }
-
+        // Return preferred provider if 'both'
+        if (peer.source === 'both') return 'local';
+        if (peer.source === 'internet') return 'internet';
+        if (peer.source === 'local') return 'local';
         return null;
-    }
-
-    // ─── Internet P2P (Trystero + MQTT) ─────────────────────────
-
-    startTrysteroProvider(roomName: string, password?: string, relayUrls?: string[], mqttCredentials?: { username: string; password: string }) {
-        if (this.trysteroProvider) {
-            this.log('Destroying existing Trystero provider');
-            this.trysteroProvider.destroy();
-            this.trysteroProvider = null;
-        }
-
-        this.log(`Starting TrysteroProvider for room: ${roomName}, relays: [${relayUrls?.join(', ') || 'defaults'}], auth: ${mqttCredentials?.username ? 'yes' : 'no'}`);
-        try {
-            this.trysteroProvider = new TrysteroProvider(
-                `mqtt-${roomName}`,
-                this.ydoc,
-                {
-                    awareness: this.awareness,
-                    filterBcConns: false,
-                    disableBc: true, // Disable BroadcastChannel — not useful in Obsidian/Electron
-                    joinRoom: (config: any, roomId: string) => {
-                        return joinRoom({
-                            ...config,
-                            appId: config.appId || 'obsidian-p2p-sync',
-                            password: password || undefined,
-                            // relayUrls tells trystero which MQTT brokers to connect to
-                            ...(relayUrls && relayUrls.length > 0 ? { relayUrls } : {}),
-                            // MQTT credentials passed directly to mqtt.connect() options
-                            // via our patched mqtt.js (bypasses URL credential parsing)
-                            ...(mqttCredentials?.username ? {
-                                mqttUsername: mqttCredentials.username,
-                                mqttPassword: mqttCredentials.password,
-                            } : {}),
-                        }, roomId);
-                    },
-                    password: password || undefined,
-                }
-            );
-
-            this.trysteroProvider.on('synced', (event: any) => {
-                this.log(`Trystero synced: ${JSON.stringify(event)}`);
-            });
-
-            this.trysteroProvider.on('peers', (event: any) => {
-                this.log(`Trystero peers: added=${event.added}, removed=${event.removed}`);
-                this.emitPeerList();
-            });
-
-            this.log('TrysteroProvider started');
-        } catch (e) {
-            console.error('[P2P Yjs] Failed to start TrysteroProvider', e);
-        }
-    }
-
-    stopTrysteroProvider() {
-        if (this.trysteroProvider) {
-            // @ts-ignore
-            closeAllClients(); // Close Trystero MQTT clients
-            this.trysteroProvider.destroy();
-            this.trysteroProvider = null;
-            this.log('Trystero provider stopped');
-        }
-
-        // Remove all MQTT origins
-        for (const [clientId, origins] of this.peerOrigins) {
-            const mqttOrigins = Array.from(origins).filter(o => o.startsWith('mqtt-'));
-            mqttOrigins.forEach(o => origins.delete(o));
-            if (origins.size === 0) this.peerOrigins.delete(clientId);
-        }
-
-        this.emitPeerList();
-    }
-
-    // ─── Local LAN P2P (Trystero via Local Signaling) ─────────
-
-    startLocalWebrtcProvider(signalingUrl: string, roomName: string, password?: string) {
-        if (this.localWebrtcProvider) {
-            this.log('Destroying existing local provider');
-            this.localWebrtcProvider.destroy();
-            this.localWebrtcProvider = null;
-        }
-
-        this.log(`Starting local TrysteroProvider: signaling=${signalingUrl}, room=${roomName}`);
-        try {
-            // Use TrysteroProvider but with our custom local strategy
-            this.localWebrtcProvider = new TrysteroProvider(
-                `lan-${roomName}`,
-                this.ydoc,
-                {
-                    appId: 'obsidian-p2p-local', // Identifier for the local app context
-                    password: password || undefined,
-                    joinRoom: (config: any, roomId: string) => {
-                        return joinLocalRoom({
-                            ...config,
-                            clientUrl: signalingUrl,
-                            settings: this.settings
-                        }, roomId);
-                    },
-                    awareness: this.awareness,
-                    filterBcConns: false,
-                    disableBc: true,
-                }
-            );
-
-            this.localWebrtcProvider.on('status', (event: any) => {
-                this.log(`Local Trystero status: ${JSON.stringify(event)}`);
-            });
-
-            this.localWebrtcProvider.on('peers', (event: any) => {
-                this.log(`Local Trystero peers changed`);
-                this.emitPeerList();
-            });
-
-            this.log('Local TrysteroProvider started');
-        } catch (e) {
-            console.error('[P2P Yjs] Failed to start local TrysteroProvider', e);
-        }
-    }
-
-    stopLocalWebrtcProvider() {
-        if (this.localWebrtcProvider) {
-            this.log('Stopping local WebrtcProvider');
-            try {
-                this.localWebrtcProvider.destroy();
-            } catch (e) {
-                console.error('[P2P Yjs] Error stopping WebrtcProvider', e);
-            }
-            this.localWebrtcProvider = null;
-            this.log('Local WebRTC provider stopped');
-        }
-
-        // Remove all LAN origins
-        for (const [clientId, origins] of this.peerOrigins) {
-            const lanOrigins = Array.from(origins).filter(o => o.startsWith('lan-'));
-            lanOrigins.forEach(o => origins.delete(o));
-            if (origins.size === 0) this.peerOrigins.delete(clientId);
-        }
-
-        this.emitPeerList();
     }
 
     // ─── Lifecycle ──────────────────────────────────────────────
 
     destroy() {
-        this.stopTrysteroProvider();
-        this.stopLocalWebrtcProvider();
+        this.providerManager.destroy(); // Destroys all strategies
         this.awareness.destroy();
         this.ydoc.destroy();
     }
