@@ -173,10 +173,21 @@ export const joinRoom = strategy({
                         // We use the 'data' property to avoid collision with our 'type'='publish'.
 
                         if (msg.data) {
-                            // Fix: Extract peerId from message (assuming server or sender added it)
-                            // If missing, Trystero will fail to track the peer.
-                            const peerId = msg.sender || 'unknown-peer';
-                            onMessage(msg.topic, msg.data, peerId);
+                            // Trystero expects onMessage(topic, data, signalPeer)
+                            // signalPeer is a function (topic, data) => void used to reply/signal back
+
+                            const signalPeer = (targetTopic: string, payload: any) => {
+                                if (ws.readyState === 1) {
+                                    ws.send(JSON.stringify({
+                                        type: 'publish',
+                                        topic: targetTopic,
+                                        sender: selfId,
+                                        data: payload
+                                    }));
+                                }
+                            };
+
+                            onMessage(msg.topic, msg.data, signalPeer);
                         }
                     }
                 }
