@@ -167,7 +167,7 @@ export class MqttStrategy implements ConnectionStrategy {
         if (origin === this.provider) {
             isFromMe = true;
         } else if (origin && typeof origin === 'object') {
-            const originRoom = origin.roomName || origin.room?.name;
+            const originRoom = origin.roomName || origin.room?.name || origin.name;
             // Our room name includes 'mqtt-' prefix
             if (originRoom && this.provider && this.provider.roomName === originRoom) {
                 isFromMe = true;
