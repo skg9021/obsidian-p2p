@@ -31,9 +31,11 @@ export class LocalStrategy implements ConnectionStrategy {
         this.doc = doc;
         this.awareness = awareness;
         if (this.awareness) {
-            this.awareness.on('update', ({ added, removed, updated }: any, origin: any) => {
-                this.handleAwarenessUpdate(added, removed, origin);
-            });
+            if (this.awareness) {
+                this.awareness.on('update', ({ added, removed, updated }: any, origin: any) => {
+                    this.handleAwarenessUpdate(added, removed, updated, origin);
+                });
+            }
         }
     }
 
@@ -161,7 +163,29 @@ export class LocalStrategy implements ConnectionStrategy {
                 // TrysteroProvider might not call leave() on the room, so we do it manually
                 // to ensure the WebSocket is closed.
                 if (this.provider.trystero && typeof this.provider.trystero.leave === 'function') {
-                    this.provider.trystero.leave();
+                    // Suppress "User-Initiated Abort" error from Trystero's console.error during leave
+                    const originalError = console.error;
+                    console.error = (...args) => {
+                        // Check for RTCError: User-Initiated Abort
+                        if (args[0] && (
+                            (args[0].error instanceof Error && args[0].error.message.includes('User-Initiated Abort')) ||
+                            (typeof args[0] === 'object' && args[0].toString().includes('User-Initiated Abort')) ||
+                            (typeof args[0] === 'string' && args[0].includes('User-Initiated Abort'))
+                        )) {
+                            // Ignore this specific error during disconnect
+                            return;
+                        }
+                        originalError.apply(console, args);
+                    };
+
+                    // Leave is async, we let it run but restore console.error after a short delay
+                    this.provider.trystero.leave().catch((e: any) => {
+                        // originalError('Leave failed', e);
+                    }).finally(() => {
+                        setTimeout(() => {
+                            console.error = originalError;
+                        }, 500);
+                    });
                 }
 
                 this.provider.destroy();
@@ -207,11 +231,11 @@ export class LocalStrategy implements ConnectionStrategy {
         return this.provider;
     }
 
-    private handleAwarenessUpdate(added: number[], removed: number[], origin: any) {
+    private handleAwarenessUpdate(added: number[], removed: number[], updated: number[], origin: any) {
         let isFromMe = false;
 
         // Debug logging for awareness origin
-        this.logger?.debug('Awareness update:', { added, removed, origin });
+        this.logger?.debug('Awareness update:', { added, removed, updated, origin });
 
         // Check origin logic similar to MqttStrategy
         if (origin === this.provider) {
