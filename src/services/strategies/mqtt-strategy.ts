@@ -164,10 +164,16 @@ export class MqttStrategy implements ConnectionStrategy {
 
         let isFromMe = false;
 
+        this.logger.debug('[MqttStrategy] Awareness update:', { added, removed, origin });
+
         if (origin === this.provider) {
             isFromMe = true;
         } else if (origin && typeof origin === 'object') {
             const originRoom = origin.roomName || origin.room?.name || origin.name;
+            const myRoom = this.provider?.roomName;
+
+            this.logger.trace(`[MqttStrategy] Origin check: originRoom=${originRoom}, myRoom=${myRoom}`);
+
             // Our room name includes 'mqtt-' prefix
             if (originRoom && this.provider && this.provider.roomName === originRoom) {
                 isFromMe = true;
@@ -175,6 +181,7 @@ export class MqttStrategy implements ConnectionStrategy {
         }
 
         if (!isFromMe) {
+            this.logger.trace('[MqttStrategy] Ignoring awareness update from other origin');
             // Check implicit: if I am the ONLY provider, assume it's me? 
             // Risky if we have multiple.
             // But if 'origin' is null/undefined (local changes), we ignore.
