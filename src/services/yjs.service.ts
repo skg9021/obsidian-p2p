@@ -140,6 +140,7 @@ export class YjsService {
                 let source: PeerInfo['source'] = 'local';
                 if (isLocal && isInternet) source = 'both';
                 else if (isInternet) source = 'internet';
+                else if (isLocal) source = 'local';
                 else source = 'unknown';
 
                 peers.push({ name: state.name, ip: state.ip, clientId, source });
