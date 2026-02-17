@@ -22,18 +22,38 @@ export const joinRoom = strategy({
             const url = (config as any).clientUrl || `ws://localhost:${settings.localServerPort}`;
             console.log(`[Trystero Local] Connecting to ${url}`);
 
-            // Proxy object to mimic WebSocket but handle reconnection
+            const messageQueue: any[] = [];
+            const activeSubscriptions = new Set<string>(); // Track active subscriptions
+
             const socketProxy = {
                 url: url,
                 readyState: 0 as number, // 0=CONNECTING, 1=OPEN, 2=CLOSING, 3=CLOSED
                 send: (data: any) => {
+                    const parsed = typeof data === 'string' ? JSON.parse(data) : data;
+
+                    // Track subscriptions from outgoing messages
+                    if (parsed && parsed.type === 'subscribe' && Array.isArray(parsed.topics)) {
+                        parsed.topics.forEach((t: string) => activeSubscriptions.add(t));
+                        // Don't queue subscribe messages, we handle them on 'open' via activeSubscriptions
+                        if (internalWs && internalWs.readyState === 1) { // 1=OPEN
+                            internalWs.send(typeof data === 'string' ? data : JSON.stringify(data));
+                        }
+                        return;
+                    }
+                    if (parsed && parsed.type === 'unsubscribe' && Array.isArray(parsed.topics)) {
+                        parsed.topics.forEach((t: string) => activeSubscriptions.delete(t));
+                        // Don't queue unsubscribe messages. If we aren't connected, we are already unsubscribed.
+                        if (internalWs && internalWs.readyState === 1) { // 1=OPEN
+                            internalWs.send(typeof data === 'string' ? data : JSON.stringify(data));
+                        }
+                        return;
+                    }
+
                     if (internalWs && internalWs.readyState === 1) { // 1=OPEN
-                        internalWs.send(data);
+                        internalWs.send(typeof data === 'string' ? data : JSON.stringify(data));
                     } else {
-                        // Queue or drop? For signaling, dropping might be okay as retries happen at higher level?
-                        // actually Trystero might expect reliable transport?
-                        // Let's just drop and hope for reconnection + re-announce.
-                        // console.warn('[Trystero Local] Send failed: Socket not open');
+                        // Queue only data/signaling messages
+                        messageQueue.push(data);
                     }
                 },
                 close: () => {
@@ -67,6 +87,19 @@ export const joinRoom = strategy({
                         socketProxy.readyState = 1; // OPEN
                         reconnectParams.attempts = 0;
                         reconnectParams.delay = 1000;
+
+                        // 1. Resend active subscriptions (Critical for re-connect)
+                        if (activeSubscriptions.size > 0) {
+                            console.log(`[Trystero Local] Restoring ${activeSubscriptions.size} subscriptions`);
+                            const topics = Array.from(activeSubscriptions);
+                            internalWs?.send(JSON.stringify({ type: 'subscribe', topics }));
+                        }
+
+                        // 2. Flush queue
+                        while (messageQueue.length > 0) {
+                            const data = messageQueue.shift();
+                            internalWs?.send(typeof data === 'string' ? data : JSON.stringify(data));
+                        }
 
                         // Notify listeners
                         (listeners['open'] || []).forEach(l => l({}));
