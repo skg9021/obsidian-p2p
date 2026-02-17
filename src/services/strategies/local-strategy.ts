@@ -198,17 +198,27 @@ export class LocalStrategy implements ConnectionStrategy {
     private handleAwarenessUpdate(added: number[], removed: number[], origin: any) {
         let isFromMe = false;
 
+        // Debug logging for awareness origin
+        console.log('[LocalStrategy] Awareness update:', { added, removed, origin });
+
         // Check origin logic similar to MqttStrategy
         if (origin === this.provider) {
             isFromMe = true;
         } else if (origin && typeof origin === 'object') {
             const originRoom = origin.roomName || origin.room?.name;
-            if (originRoom && this.provider && this.provider.roomName === originRoom) {
+            const myRoom = this.provider?.roomName;
+
+            console.log(`[LocalStrategy] Origin check: originRoom=${originRoom}, myRoom=${myRoom}`);
+
+            if (originRoom && myRoom && myRoom === originRoom) {
                 isFromMe = true;
             }
         }
 
-        if (!isFromMe) return;
+        if (!isFromMe) {
+            console.log('[LocalStrategy] Ignoring awareness update from other origin');
+            return;
+        }
 
         if (this.awareness) {
             const allStates = this.awareness.getStates();
