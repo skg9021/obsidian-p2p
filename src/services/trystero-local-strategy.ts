@@ -140,9 +140,10 @@ export const joinRoom = strategy({
                         // We use the 'data' property to avoid collision with our 'type'='publish'.
 
                         if (msg.data) {
-                            onMessage(msg.topic, msg.data, ((t: string, d: any) => {
-                                send({ type: 'publish', topic: t, data: d });
-                            }) as any);
+                            // Fix: Extract peerId from message (assuming server or sender added it)
+                            // If missing, Trystero will fail to track the peer.
+                            const peerId = msg.sender || 'unknown-peer';
+                            onMessage(msg.topic, msg.data, peerId);
                         }
                     }
                 }
@@ -162,21 +163,33 @@ export const joinRoom = strategy({
 
     // 3. Announce presence
     announce: (ws: WebSocket, rootTopic: string) => {
-        const payload = { peerId: selfId };
+        // Trystero sends its own announce packet, usually? 
+        // No, 'announce' is called by Trystero to say "I am here".
+        // We should just broadcast a presence message?
+        // Actually, Trystero usually handles the payload logic if we just provide the channel.
+        // But here 'announce' is part of the strategy interface. 
+        // The default strategy sends a 'multicast' packet?
+        // Let's just do a simple publish to rootTopic.
+
         ws.send(JSON.stringify({
             type: 'publish',
             topic: rootTopic,
-            data: payload
+            sender: selfId,
+            data: { type: 'announce', peerId: selfId }
         }));
     },
 
     // 4. Publish message (Signaling) - WAS MISSING
+    // 4. Publish message (Signaling)
     publish: (ws: WebSocket, topic: string, data: any) => {
-        ws.send(JSON.stringify({
-            type: 'publish',
-            topic: topic,
-            data: data
-        }));
+        if (ws.readyState === 1) { // 1=OPEN
+            ws.send(JSON.stringify({
+                type: 'publish',
+                topic: topic,
+                sender: selfId, // Include our selfId so receiver knows who sent it
+                data: data
+            }));
+        }
     },
 
     // 5. Leave room
