@@ -211,18 +211,10 @@ export class LocalStrategy implements ConnectionStrategy {
         if (origin === this.provider) {
             isFromMe = true;
         } else if (origin && typeof origin === 'object') {
-            const originRoom = origin.roomName || origin.room?.name;
+            const originRoom = origin.roomName || origin.room?.name || origin.name;
             const myRoom = this.provider?.roomName;
 
             this.logger?.trace(`Origin check: originRoom=${originRoom}, myRoom=${myRoom}`);
-
-            if (originRoom && myRoom && myRoom === originRoom) {
-                isFromMe = true;
-            }
-        } else if (origin && typeof origin === 'object') {
-            // Fallback for TrysteroDocRoom which has 'name' property directly
-            const originRoom = origin.name;
-            const myRoom = this.provider?.roomName;
 
             if (originRoom && myRoom && myRoom === originRoom) {
                 isFromMe = true;
