@@ -78,16 +78,16 @@ export class YjsService {
      * Helper to determine the best provider for a given client ID 
      * (Delegated to Provider Mananger's source info)
      */
-    getClientProvider(clientId: number): 'internet' | 'local' | null {
+    getClientProvider(clientId: number): 'mqtt' | 'local' | null {
         const peers = this.providerManager.getPeers();
         const peer = peers.find(p => p.clientId === clientId);
         if (!peer) return null;
 
         // Return preferred provider if 'both'
         if (peer.source === 'both') return 'local';
-        if (peer.source === 'internet') return 'internet';
+        if (peer.source === 'internet') return 'mqtt';
         if (peer.source === 'local') return 'local';
-        return null;
+        return null; // Should handle unknown?
     }
 
     // ─── Lifecycle ──────────────────────────────────────────────
