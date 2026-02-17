@@ -158,6 +158,12 @@ export class LocalStrategy implements ConnectionStrategy {
     disconnect(): void {
         if (this.provider) {
             try {
+                // TrysteroProvider might not call leave() on the room, so we do it manually
+                // to ensure the WebSocket is closed.
+                if (this.provider.trystero && typeof this.provider.trystero.leave === 'function') {
+                    this.provider.trystero.leave();
+                }
+
                 this.provider.destroy();
             } catch (e) {
                 console.error('[LocalStrategy] Error destroying provider', e);
