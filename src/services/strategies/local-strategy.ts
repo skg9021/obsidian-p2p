@@ -148,8 +148,20 @@ export class LocalStrategy implements ConnectionStrategy {
                 // console.log(`[LocalStrategy] Status:`, event);
             });
 
-            // Trigger initial peer check?
             // TrysteroProvider generally emits events when connected.
+            if (this.provider.trystero) {
+                this.provider.trystero.onPeerJoin((peerId: string) => {
+                    console.log('[LocalStrategy] Trystero Peer Joined:', peerId);
+                    this.logger?.debug('[LocalStrategy] Trystero Peer Joined:', peerId);
+                });
+                this.provider.trystero.onPeerLeave((peerId: string) => {
+                    console.log('[LocalStrategy] Trystero Peer Left:', peerId);
+                    this.logger?.debug('[LocalStrategy] Trystero Peer Left:', peerId);
+                });
+                this.provider.trystero.onPeerStream((stream: any, peerId: string) => {
+                    console.log('[LocalStrategy] Trystero Peer Stream:', peerId);
+                });
+            }
 
         } catch (e) {
             console.error('[LocalStrategy] Failed to start TrysteroProvider', e);
