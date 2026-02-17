@@ -189,6 +189,14 @@ export const joinRoom = strategy({
 
                             const signalPeer = (targetTopic: string, payload: any) => {
                                 if (ws.readyState === 1) {
+                                    try {
+                                        const decoded = typeof payload === 'string' ? JSON.parse(payload) : payload;
+                                        const type = decoded.offer ? 'offer' : (decoded.answer ? 'answer' : 'announce');
+                                        console.log(`[Trystero Local] Sending ${type} to topic ${targetTopic}`);
+                                    } catch (e) {
+                                        console.log(`[Trystero Local] Sending raw data to topic ${targetTopic}`);
+                                    }
+
                                     ws.send(JSON.stringify({
                                         type: 'publish',
                                         topic: targetTopic,

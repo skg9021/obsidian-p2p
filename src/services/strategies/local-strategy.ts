@@ -163,6 +163,22 @@ export class LocalStrategy implements ConnectionStrategy {
                 });
             }
 
+            // Debug: Periodic check of Trystero peers
+            setInterval(() => {
+                const peers = this.provider?.trystero?.getPeers() || {};
+                const peerIds = Object.keys(peers);
+                if (peerIds.length > 0) {
+                    const states = peerIds.map(id => {
+                        const p = peers[id];
+                        // Trystero peer object exposes 'connection' (RTCPeerConnection)
+                        return `${id}: ${p.connection?.connectionState}, ${p.connection?.iceConnectionState}`;
+                    });
+                    console.log('[LocalStrategy] Internal Peers State:', states);
+                } else {
+                    // console.log('[LocalStrategy] No Internal Peers');
+                }
+            }, 5000);
+
         } catch (e) {
             console.error('[LocalStrategy] Failed to start TrysteroProvider', e);
             throw e;
