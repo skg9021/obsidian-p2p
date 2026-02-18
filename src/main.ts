@@ -143,7 +143,7 @@ export default class P2PSyncPlugin extends Plugin {
     // --- Networking ---
 
     async connect() {
-        // TODO: Explore why MQTT is not here considering this is common connect.
+        // TODO: Explore why MQTT is not here considering this is common connect
 
         this.logger.log('--- connect() called ---');
         this.disconnect();
