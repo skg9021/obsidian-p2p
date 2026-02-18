@@ -43,6 +43,10 @@ export default class P2PSyncPlugin extends Plugin {
         // Initialize Yjs Service (manages Y.Doc + both P2P providers + awareness)
         this.yjsService = new YjsService(this.app, this.settings);
         this.yjsService.onPeersUpdated = (peers) => {
+            // START TRACING
+            const trace = new Error('Peer Update Tracer');
+            this.logger.trace('[P2P Sync] onPeersUpdated stack:', trace.stack);
+            // END TRACING
             this.logger.log(`Awareness peers: [${peers.map(p => `${p.name}(${p.source})`).join(', ')}]`);
             this.connectedClients = peers;
             if (this.settingsTab) this.settingsTab.updatePeerList();

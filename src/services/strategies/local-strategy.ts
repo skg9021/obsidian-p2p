@@ -35,6 +35,7 @@ export class LocalStrategy implements ConnectionStrategy {
                 this.handleAwarenessUpdate(added, removed, origin);
             });
         }
+        this.logger.log('[LocalStrategy] Initialized with awareness: ', this.awareness);
     }
 
     async connect(roomName: string, settings: any): Promise<void> {
