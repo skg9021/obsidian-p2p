@@ -207,7 +207,7 @@ export class LocalStrategy implements ConnectionStrategy {
         let isFromMe = false;
 
         // Debug logging for awareness origin
-        this.logger?.debug('[LocalStrategy] Awareness update:', { added, removed, origin });
+        this.logger?.debug('[LocalStrategy] Awareness update:', { added, removed, origin }, this.provider);
 
         // Check origin logic similar to MqttStrategy
         if (origin === this.provider) {
