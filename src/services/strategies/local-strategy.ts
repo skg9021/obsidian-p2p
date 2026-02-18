@@ -207,7 +207,7 @@ export class LocalStrategy implements ConnectionStrategy {
         let isFromMe = false;
 
         // Debug logging for awareness origin
-        this.logger?.debug('Awareness update:', { added, removed, origin });
+        this.logger?.debug('[LocalStrategy] Awareness update:', { added, removed, origin });
 
         // Check origin logic similar to MqttStrategy
         if (origin === this.provider) {
@@ -220,7 +220,7 @@ export class LocalStrategy implements ConnectionStrategy {
                 const originRoom = origin.roomName || origin.room?.name || origin.name;
                 const myRoom = this.provider?.roomName;
 
-                this.logger?.trace(`Origin check: originRoom=${originRoom}, myRoom=${myRoom}`);
+                this.logger?.trace(`[LocalStrategy] Origin check: originRoom=${originRoom}, myRoom=${myRoom}`);
 
                 if (originRoom && myRoom && myRoom === originRoom) {
                     isFromMe = true;
@@ -229,7 +229,7 @@ export class LocalStrategy implements ConnectionStrategy {
         }
 
         if (!isFromMe) {
-            this.logger?.trace('Ignoring awareness update from other origin');
+            this.logger?.trace('[LocalStrategy] Ignoring awareness update from other origin');
             return;
         }
 

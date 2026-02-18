@@ -25,23 +25,23 @@ export class Logger {
 
     debug(message: string, ...args: any[]) {
         if (this.shouldLog('debug')) {
-            console.log(`[P2P Sync] [DEBUG] ${message}`, ...args);
+            console.log(`[DEBUG] ${message}`, ...args);
         }
     }
 
     trace(message: string, ...args: any[]) {
         if (this.shouldLog('trace')) {
-            console.log(`[P2P Sync] [TRACE] ${message}`, ...args);
+            console.log(`[TRACE] ${message}`, ...args);
         }
     }
 
     warn(message: string, ...args: any[]) {
         if (this.settings.enableDebugLogs) {
-            console.warn(`[P2P Sync] ${message}`, ...args);
+            console.warn(`[WARN] ${message}`, ...args);
         }
     }
 
     error(message: string, ...args: any[]) {
-        console.error(`[P2P Sync] ${message}`, ...args);
+        console.error(`[ERROR] ${message}`, ...args);
     }
 }

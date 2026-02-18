@@ -164,7 +164,7 @@ export class MqttStrategy implements ConnectionStrategy {
 
         let isFromMe = false;
 
-        this.logger.debug('[MqttStrategy] Awareness update:', { added, removed, origin });
+        this.logger.debug('[MqttStrategy] Awareness update:', { added, removed, origin }, this.provider);
 
         if (origin === this.provider) {
             isFromMe = true;
