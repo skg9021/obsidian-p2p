@@ -176,13 +176,7 @@ export const joinRoom = strategy({
                         // We use the 'data' property to avoid collision with our 'type'='publish'.
 
                         if (msg.data) {
-                            try {
-                                const decoded = typeof msg.data === 'string' ? JSON.parse(msg.data) : msg.data;
-                                const type = decoded.offer ? 'offer' : (decoded.answer ? 'answer' : 'announce');
-                                console.log(`[Trystero Local] Dispatching ${type} from ${decoded.peerId} (Self: ${selfId})`);
-                            } catch (e) {
-                                console.log(`[Trystero Local] Dispatching raw data (length ${msg.data.length})`);
-                            }
+                            console.log('[Trystero Local] Dispatching data to Trystero');
 
                             // Trystero expects onMessage(topic, data, signalPeer)
                             // signalPeer is a function (topic, data) => void used to reply/signal back
