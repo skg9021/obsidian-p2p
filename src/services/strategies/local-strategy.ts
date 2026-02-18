@@ -103,7 +103,12 @@ export class LocalStrategy implements ConnectionStrategy {
             return;
         }
 
-        console.log(`[LocalStrategy] Connecting to ${signalingUrl}...`);
+        if (!signalingUrl) {
+            console.error('[LocalStrategy] Missing signalingUrl in connect options');
+            return;
+        }
+
+        // console.log(`[LocalStrategy] Connecting to ${signalingUrl}...`);
 
         const password = settings.secretKey;
         if (!this.doc || !this.awareness) {
@@ -114,10 +119,7 @@ export class LocalStrategy implements ConnectionStrategy {
         // const signalingUrl = options?.signalingUrl; // This line is now redundant
         // const password = options?.password; // This line is now redundant
 
-        if (!signalingUrl) {
-            console.error('[LocalStrategy] Missing signalingUrl in connect options');
-            return;
-        }
+
 
         const fullRoomName = `lan-${roomName}`;
         console.log(`[LocalStrategy] Connecting to room: ${fullRoomName} via ${signalingUrl}`);
