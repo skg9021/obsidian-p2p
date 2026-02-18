@@ -163,21 +163,16 @@ export const joinRoom = strategy({
         const handler = (event: MessageEvent) => {
             try {
                 const msg = JSON.parse(event.data);
-                console.log('[Trystero Local] Rx:', msg.type, msg.topic);
 
                 if (msg.type === 'publish' && msg.topic) {
                     // Check if this message is relevant to our subscribed topics
                     if (msg.topic === rootTopic || msg.topic === selfTopic) {
-                        console.log('[Trystero Local] Matched topic:', msg.topic);
-
                         // Trystero expects onMessage(topic, data, sender)
                         // where 'data' is the application payload (wrapped in msg.data)
                         // and 'sender' is a function to reply to the sender (or the senderId in some contexts, but mostly reply func)
                         // We use the 'data' property to avoid collision with our 'type'='publish'.
 
                         if (msg.data) {
-                            console.log('[Trystero Local] Dispatching data to Trystero');
-
                             // Trystero expects onMessage(topic, data, signalPeer)
                             // signalPeer is a function (topic, data) => void used to reply/signal back
 
@@ -194,8 +189,6 @@ export const joinRoom = strategy({
 
                             onMessage(msg.topic, msg.data, signalPeer);
                         }
-                    } else {
-                        console.log('[Trystero Local] Ignored topic:', msg.topic, 'listening for:', rootTopic, selfTopic);
                     }
                 }
             } catch (e) {
