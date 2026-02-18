@@ -19,7 +19,7 @@ export class Logger {
 
     info(message: string, ...args: any[]) {
         if (this.shouldLog('info')) {
-            console.log(`[P2P Sync] ${message}`, ...args);
+            console.log(`[INFO] ${message}`, ...args);
         }
     }
 
