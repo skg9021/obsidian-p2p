@@ -110,7 +110,7 @@ export default class P2PSyncPlugin extends Plugin {
             this.logger.log('Layout ready, starting sync and connection');
             this.fileTransferService.initialize();
             this.syncLocalToYjs();
-            this.connect();
+            // this.connect();
         });
 
         this.logger.log('Plugin loaded successfully');
