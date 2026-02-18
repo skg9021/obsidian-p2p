@@ -235,7 +235,7 @@ export class LocalServerService {
 
     private notifyClientsUpdated() {
         const clients = Array.from(this.connectedClients.values());
-        this.log(`Connected peers: ${clients.length} [${clients.join(', ')}]`);
+        this.log(`Peers Signalled and connected on signalling socket: ${clients.length} [${clients.join(', ')}]`);
         this.onClientsUpdated(clients);
     }
 }

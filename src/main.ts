@@ -143,6 +143,8 @@ export default class P2PSyncPlugin extends Plugin {
     // --- Networking ---
 
     async connect() {
+        // TODO: Explore why MQTT is not here considering this is common connect.
+
         this.logger.log('--- connect() called ---');
         this.disconnect();
         this.statusBarItem.setText('P2P: Connecting...');
@@ -158,13 +160,7 @@ export default class P2PSyncPlugin extends Plugin {
             } catch (e) {
                 this.logger.error('Failed to start signaling server', e);
             }
-        }
-
-        // ─── Connect Strategies ───
-        await this.yjsService.providerManager.connectAll(roomName, this.settings);
-
-        // ─── Client Reconnect Logic ───
-        if (this.settings.enableLocalClient && this.settings.localServerAddress) {
+        } else if (this.settings.enableLocalClient && this.settings.localServerAddress) { // ─── Client Reconnect Logic ───
             this.checkConnection(this.settings.localServerAddress).then((canConnect) => {
                 if (!canConnect) {
                     this.logger.log(`Connection check to ${this.settings.localServerAddress} failed. Scheduling reconnect...`);
@@ -174,6 +170,10 @@ export default class P2PSyncPlugin extends Plugin {
                 }
             });
         }
+
+        // ─── Connect Strategies ───
+        await this.yjsService.providerManager.connectAll(roomName, this.settings);
+
 
         this.statusBarItem.setText('P2P: Online');
         this.fileTransferService.setupProviderActions();
@@ -275,13 +275,7 @@ export default class P2PSyncPlugin extends Plugin {
             } catch (e) {
                 this.logger.error('Failed to start signaling server', e);
             }
-        }
-
-        // Restart Strategy (Client/Host logic is internal to strategy)
-        await this.yjsService.providerManager.connectStrategy('local', roomName, this.settings);
-
-        // Client Reconnect Checks (UI feedback)
-        if (this.settings.enableLocalClient && this.settings.localServerAddress) {
+        } else if (this.settings.enableLocalClient && this.settings.localServerAddress) { // Client Reconnect Checks (UI feedback)
             this.checkConnection(this.settings.localServerAddress).then((canConnect) => {
                 if (!canConnect) {
                     this.logger.log(`Connection check to ${this.settings.localServerAddress} failed. Scheduling reconnect...`);
@@ -291,6 +285,9 @@ export default class P2PSyncPlugin extends Plugin {
                 }
             });
         }
+
+        // Restart Strategy (Client/Host logic is internal to strategy)
+        await this.yjsService.providerManager.connectStrategy('local', roomName, this.settings);
 
         this.fileTransferService.setupProviderActions();
         this.yjsService.refreshPeerList();

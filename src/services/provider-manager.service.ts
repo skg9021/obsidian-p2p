@@ -44,6 +44,7 @@ export class ProviderManager {
             console.warn(`[ProviderManager] Cannot connect: Strategy ${id} not found.`);
             return;
         }
+        console.log(`[ProviderManager] Connecting strategy ${id} to room ${roomName}`);
         await strategy.connect(roomName, settings);
     }
 
