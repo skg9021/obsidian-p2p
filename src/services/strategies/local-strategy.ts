@@ -161,12 +161,18 @@ export class LocalStrategy implements ConnectionStrategy {
     disconnect(): void {
         if (this.provider) {
             try {
+                // Fix: Manually leave the room to close the socket
+                // TrysteroProvider.destroy() creates a new room but doesn't close the old one's socket
+                if (this.provider.trystero && typeof this.provider.trystero.leave === 'function') {
+                    this.provider.trystero.leave();
+                }
+
                 this.provider.destroy();
             } catch (e) {
                 console.error('[LocalStrategy] Error destroying provider', e);
             }
             this.provider = null;
-            console.log('[LocalStrategy] Disconnected');
+            this.logger.log('[LocalStrategy] Disconnected');
         }
         this.myPeers.clear();
         this.notifyPeersChanged();
