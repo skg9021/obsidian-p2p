@@ -57,6 +57,7 @@ export const joinRoom = strategy({
                     }
                 },
                 close: () => {
+                    console.log('[Trystero Local] Manual close initiated via proxy.');
                     manualClose = true;
                     if (internalWs) internalWs.close();
                 },
@@ -200,8 +201,13 @@ export const joinRoom = strategy({
 
         // Return unsubscribe function
         return () => {
+            console.log(`[Trystero Local] Unsubscribing from topics: ${rootTopic}, ${selfTopic}`);
             send({ type: 'unsubscribe', topics: [rootTopic, selfTopic] });
             ws.removeEventListener('message', handler);
+            if (typeof ws.close === 'function') {
+                console.log(`[Trystero Local] Forcing WebSocket close on unsubscribe.`);
+                ws.close();
+            }
         };
     },
 
