@@ -22,6 +22,7 @@ export class LocalStrategy implements ConnectionStrategy {
     // Track peers visible to THIS provider
     private myPeers: Map<number, any> = new Map();
     private peerUpdateCallback: ((peers: PeerInfo[]) => void) | null = null;
+    private recomputeInterval: any = null;
 
     constructor(logger: Logger) {
         this.logger = logger;
@@ -163,6 +164,12 @@ export class LocalStrategy implements ConnectionStrategy {
                 this.recomputePeers();
             });
 
+            // Fallback: y-webrtc-trystero often drops the on('peers') propagation on JOIN.
+            // We use a light interval to guarantee our UI tracks the active WebRTC Sockets transparently.
+            this.recomputeInterval = setInterval(() => {
+                this.recomputePeers();
+            }, 2000);
+
             // Trigger initial peer check?
             // TrysteroProvider generally emits events when connected.
 
@@ -173,6 +180,10 @@ export class LocalStrategy implements ConnectionStrategy {
     }
 
     disconnect(): void {
+        if (this.recomputeInterval) {
+            clearInterval(this.recomputeInterval);
+            this.recomputeInterval = null;
+        }
         if (this.provider) {
             try {
                 // Fix: Manually leave the room to close the socket
@@ -239,8 +250,12 @@ export class LocalStrategy implements ConnectionStrategy {
         // Dynamically get the active WebRTC Peer IDs directly from y-webrtc-trystero's room
         const activeTrysteroIds = Array.from(this.provider.room.trysteroConns?.keys() || []);
 
+        this.logger.debug(`[LocalStrategy] recomputePeers: active WebRTC sockets:`, activeTrysteroIds);
+
         this.awareness.getStates().forEach((state, clientId) => {
+            this.logger.debug(`[LocalStrategy] recomputePeers: checking clientId=${clientId}, name=${state.name}, networkId=${state.networkId}`);
             if (state.networkId && activeTrysteroIds.includes(state.networkId)) {
+                this.logger.debug(`[LocalStrategy] -> MATCH for ${state.name}!`);
                 newPeers.set(clientId, state);
             }
         });

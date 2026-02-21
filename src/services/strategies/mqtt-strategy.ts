@@ -21,6 +21,7 @@ export class MqttStrategy implements ConnectionStrategy {
     // Track peers visible to THIS provider
     private myPeers: Map<number, any> = new Map();
     private peerUpdateCallback: ((peers: PeerInfo[]) => void) | null = null;
+    private recomputeInterval: any = null;
 
     constructor(logger: Logger) {
         this.logger = logger;
@@ -99,6 +100,12 @@ export class MqttStrategy implements ConnectionStrategy {
                 this.recomputePeers();
             });
 
+            // Fallback: y-webrtc-trystero often drops the on('peers') propagation on JOIN.
+            // We use a light interval to guarantee our UI tracks the active WebRTC Sockets transparently.
+            this.recomputeInterval = setInterval(() => {
+                this.recomputePeers();
+            }, 2000);
+
         } catch (e) {
             this.logger.error('[MqttStrategy] Failed to start TrysteroProvider', e);
             throw e;
@@ -106,6 +113,10 @@ export class MqttStrategy implements ConnectionStrategy {
     }
 
     disconnect(): void {
+        if (this.recomputeInterval) {
+            clearInterval(this.recomputeInterval);
+            this.recomputeInterval = null;
+        }
         if (this.provider) {
             // @ts-ignore
             closeAllClients(); // Close Trystero MQTT clients
