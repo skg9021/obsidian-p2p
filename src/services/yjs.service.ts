@@ -62,8 +62,10 @@ export class YjsService {
         // Directly observe the tombstones map so remote deletions are always processed,
         // even if applyToDisk was recently debounced away.
         this.tombstones.observe((event) => {
+            const keys = Array.from(event.keysChanged);
+            console.log(`[P2P Yjs] tombstones.observe fired: origin=${event.transaction.origin}, keys=${JSON.stringify(keys)}`);
             if (event.transaction.origin !== 'local') {
-                // Schedule after debounce period (500ms) so applyToDisk will accept the call
+                console.log(`[P2P Yjs] Remote tombstone detected, scheduling applyToDisk in 600ms`);
                 setTimeout(() => this.applyToDisk(), 600);
             }
         });
@@ -118,21 +120,28 @@ export class YjsService {
      * move the file to trash instead of hard-deleting it.
      */
     handleLocalDelete(file: TAbstractFile) {
-        if (this.isRemoteUpdate) return;
-        if (!(file instanceof TFile) || file.extension !== 'md') return;
+        if (this.isRemoteUpdate) {
+            console.log(`[P2P Yjs] handleLocalDelete SKIPPED (isRemoteUpdate): ${file instanceof TFile ? file.path : 'not-a-file'}`);
+            return;
+        }
+        if (!(file instanceof TFile)) return;
 
-        this.log(`Soft-deleting ${file.path} (tombstone)`);
+        console.log(`[P2P Yjs] handleLocalDelete: soft-deleting ${file.path} (ext=${file.extension})`);
 
         // Guard: prevent applyToDisk from recreating this file even if CRDT merge re-introduces it
         this.pendingDeletes.add(file.path);
 
         this.ydoc.transact(() => {
-            this.yMap.delete(file.path);
+            // Only remove from yMap if it's a markdown file (yMap only stores .md content)
+            if (file.extension === 'md') {
+                this.yMap.delete(file.path);
+            }
             this.tombstones.set(file.path, {
                 deletedBy: this.settings.deviceName,
                 deletedAt: Date.now(),
             });
         }, 'local');
+        console.log(`[P2P Yjs] Tombstone set. Current tombstones: [${Array.from(this.tombstones.keys()).join(', ')}]`);
     }
 
     async handleLocalModify(file: TAbstractFile) {
