@@ -24,6 +24,9 @@ export class YjsService {
     awareness: awarenessProtocol.Awareness;
     isRemoteUpdate: boolean = false;
 
+    /** Paths deleted locally — prevents applyToDisk from recreating them even if CRDT merge re-introduces the key */
+    private pendingDeletes: Set<string> = new Set();
+
     /** Provider Manager handling strategies */
     providerManager: ProviderManager;
 
@@ -110,6 +113,10 @@ export class YjsService {
         if (!(file instanceof TFile) || file.extension !== 'md') return;
 
         this.log(`Soft-deleting ${file.path} (tombstone)`);
+
+        // Guard: prevent applyToDisk from recreating this file even if CRDT merge re-introduces it
+        this.pendingDeletes.add(file.path);
+
         this.ydoc.transact(() => {
             this.yMap.delete(file.path);
             this.tombstones.set(file.path, {
@@ -126,10 +133,20 @@ export class YjsService {
         const content = await this.app.vault.read(file);
 
         this.ydoc.transact(() => {
-            // Clear any tombstone — re-creating/editing a file un-deletes it
+            // Only clear tombstones that are old (>10s).
+            // Fresh tombstones were just set by a delete and might be re-triggered
+            // by applyToDisk creating the file (which fires a 'create' event).
             if (this.tombstones.has(file.path)) {
-                this.log(`Clearing tombstone for ${file.path} (file modified/recreated)`);
-                this.tombstones.delete(file.path);
+                const meta = this.tombstones.get(file.path);
+                const age = Date.now() - (meta?.deletedAt || 0);
+                if (age > 10000) {
+                    this.log(`Clearing old tombstone for ${file.path} (age=${Math.round(age / 1000)}s, file recreated by user)`);
+                    this.tombstones.delete(file.path);
+                    this.pendingDeletes.delete(file.path);
+                } else {
+                    this.log(`Ignoring fresh tombstone for ${file.path} (age=${Math.round(age / 1000)}s)`);
+                    return; // Don't re-add the file to yMap
+                }
             }
 
             let yText = this.yMap.get(file.path);
@@ -148,8 +165,10 @@ export class YjsService {
         try {
             // 1) Apply content updates (create / modify)
             for (const [path, yText] of this.yMap.entries()) {
-                // Skip files that have a tombstone — they're pending deletion
+                // Skip files with active tombstones
                 if (this.tombstones.has(path)) continue;
+                // Skip files deleted locally (protects against CRDT merge re-introducing the key)
+                if (this.pendingDeletes.has(path)) continue;
 
                 const content = (yText as Y.Text).toString();
                 const file = this.app.vault.getAbstractFileByPath(path);
@@ -167,7 +186,14 @@ export class YjsService {
                 const file = this.app.vault.getAbstractFileByPath(path);
                 if (file instanceof TFile) {
                     this.log(`Moving ${path} to trash (deleted by ${meta.deletedBy} at ${new Date(meta.deletedAt).toLocaleString()})`);
-                    await this.app.vault.trash(file, false); // false = use Obsidian .trash/, not system trash
+                    await this.app.vault.trash(file, false);
+                }
+
+                // Clean up yMap if CRDT merge re-introduced the key
+                if (this.yMap.has(path)) {
+                    this.ydoc.transact(() => {
+                        this.yMap.delete(path);
+                    }, 'local');
                 }
             }
         } catch (e) { console.error("Sync Write Error", e); }
