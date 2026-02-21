@@ -84,7 +84,17 @@ export default class P2PSyncPlugin extends Plugin {
         this.addSettingTab(this.settingsTab);
 
         this.statusBarItem = this.addStatusBarItem();
-        this.statusBarItem.setText('P2P: Init');
+        this.statusBarItem.setText('🔴 P2P: Offline');
+
+        // Bind ProviderManager's aggregated status to the UI
+        this.yjsService.providerManager.onAggregatedStatusChanged = (status) => {
+            let label = '🔴 P2P: Offline';
+            if (status === 'connected') label = '🟢 P2P: Online';
+            else if (status === 'connecting') label = '🟡 P2P: Connecting...';
+            else if (status === 'error') label = '🔴 P2P: Error';
+
+            this.statusBarItem.setText(label);
+        };
 
         this.addCommand({ id: 'p2p-connect', name: 'Connect', callback: () => this.connect() });
         this.addCommand({ id: 'p2p-force-sync', name: 'Force Sync', callback: () => this.syncLocalToYjs() });
@@ -151,7 +161,6 @@ export default class P2PSyncPlugin extends Plugin {
 
         this.logger.log('--- connect() called ---');
         this.disconnect();
-        this.statusBarItem.setText('P2P: Connecting...');
 
         const roomName = await this.getRoomName();
 
@@ -175,11 +184,7 @@ export default class P2PSyncPlugin extends Plugin {
             });
         }
 
-        // ─── Connect Strategies ───
         await this.yjsService.providerManager.connectAll(roomName, this.settings);
-
-
-        this.statusBarItem.setText('P2P: Online');
         this.fileTransferService.setupProviderActions();
         this.yjsService.refreshPeerList();
         this.logger.log('--- connect() complete ---');
@@ -190,7 +195,9 @@ export default class P2PSyncPlugin extends Plugin {
 
         const delay = Math.min(1000 * Math.pow(2, this.clientReconnectAttempts), this.maxReconnectDelay);
         this.logger.log(`Attempting reconnect in ${delay}ms (Attempt ${this.clientReconnectAttempts + 1})`);
-        this.statusBarItem.setText(`P2P: Retry in ${delay / 1000}s`);
+
+        // Let ProviderManager handle the "Disconnected" UI state while we wait, 
+        // or we could show a distinct UI for retrying. For now, just logging is fine.
 
         this.clientReconnectTimeout = setTimeout(() => {
             this.clientReconnectAttempts++;

@@ -1,6 +1,6 @@
 
 import { ConnectionStrategy, StrategyId } from './strategies/connection-strategy.interface';
-import { PeerInfo } from './p2p-types';
+import { PeerInfo, ConnectionStatus } from './p2p-types';
 
 export class ProviderManager {
     private strategies: Map<StrategyId, ConnectionStrategy> = new Map();
@@ -15,6 +15,17 @@ export class ProviderManager {
      */
     public onPeersUpdated: (peers: PeerInfo[]) => void = () => { };
 
+    /**
+     * Map of strategy statuses.
+     */
+    private strategyStatuses: Map<StrategyId, ConnectionStatus> = new Map();
+
+    /**
+     * Callback for when the aggregated connection status changes.
+     */
+    public onAggregatedStatusChanged: (status: ConnectionStatus) => void = () => { };
+    private currentAggregatedStatus: ConnectionStatus = 'disconnected';
+
     constructor() { }
 
     registerStrategy(strategy: ConnectionStrategy) {
@@ -23,10 +34,17 @@ export class ProviderManager {
             this.strategies.get(strategy.id)?.destroy();
         }
         this.strategies.set(strategy.id, strategy);
+        this.strategyStatuses.set(strategy.id, 'disconnected');
 
-        // Listen to updates from this strategy
+        // Listen to peer updates from this strategy
         strategy.onPeerUpdate(() => {
             this.recalculateAggregatedPeers();
+        });
+
+        // Listen to status updates from this strategy
+        strategy.onStatusChanged((status) => {
+            this.strategyStatuses.set(strategy.id, status);
+            this.recalculateAggregatedStatus();
         });
     }
 
@@ -72,7 +90,9 @@ export class ProviderManager {
     destroy() {
         this.strategies.forEach(strategy => strategy.destroy());
         this.strategies.clear();
+        this.strategyStatuses.clear();
         this.aggregatedPeers = [];
+        this.emitAggregatedStatus('disconnected');
     }
 
     getPeers(): PeerInfo[] {
@@ -140,5 +160,38 @@ export class ProviderManager {
 
         this.aggregatedPeers = newAggregatedList;
         this.onPeersUpdated(this.aggregatedPeers);
+    }
+
+    /**
+     * Recalculates the overall connection status across all strategies.
+     */
+    private recalculateAggregatedStatus() {
+        let hasConnected = false;
+        let hasConnecting = false;
+        let hasError = false;
+
+        this.strategyStatuses.forEach(status => {
+            if (status === 'connected') hasConnected = true;
+            else if (status === 'connecting') hasConnecting = true;
+            else if (status === 'error') hasError = true;
+        });
+
+        let newStatus: ConnectionStatus = 'disconnected';
+        if (hasConnected) {
+            newStatus = 'connected';
+        } else if (hasConnecting) {
+            newStatus = 'connecting';
+        } else if (hasError) {
+            newStatus = 'error';
+        }
+
+        this.emitAggregatedStatus(newStatus);
+    }
+
+    private emitAggregatedStatus(status: ConnectionStatus) {
+        if (this.currentAggregatedStatus !== status) {
+            this.currentAggregatedStatus = status;
+            this.onAggregatedStatusChanged(status);
+        }
     }
 }

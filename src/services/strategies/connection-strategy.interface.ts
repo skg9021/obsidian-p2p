@@ -1,7 +1,7 @@
 
 import * as Y from 'yjs';
 import * as awarenessProtocol from 'y-protocols/awareness';
-import { PeerInfo } from '../p2p-types';
+import { PeerInfo, ConnectionStatus } from '../p2p-types';
 
 export type StrategyId = 'mqtt' | 'local' | string;
 
@@ -47,6 +47,11 @@ export interface ConnectionStrategy {
      * Subscribe to peer updates specific to this strategy.
      */
     onPeerUpdate(callback: (peers: PeerInfo[]) => void): void;
+
+    /**
+     * Subscribe to status changes specific to this strategy.
+     */
+    onStatusChanged(callback: (status: ConnectionStatus) => void): void;
 
     /**
      * Returns the underlying provider instance (e.g. TrysteroProvider).

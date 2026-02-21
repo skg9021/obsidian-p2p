@@ -3,7 +3,7 @@ import * as Y from 'yjs';
 import * as awarenessProtocol from 'y-protocols/awareness';
 import { ConnectionStrategy, StrategyId } from './connection-strategy.interface';
 import { Platform } from 'obsidian';
-import { PeerInfo } from '../p2p-types';
+import { PeerInfo, ConnectionStatus } from '../p2p-types';
 import { P2PSettings } from '../../settings'; // Needed for local strategy joinRoom config
 // @ts-ignore
 import { TrysteroProvider } from '@winstonfassett/y-webrtc-trystero';
@@ -23,6 +23,10 @@ export class LocalStrategy implements ConnectionStrategy {
     private myPeers: Map<number, any> = new Map();
     private peerUpdateCallback: ((peers: PeerInfo[]) => void) | null = null;
     private recomputeInterval: any = null;
+
+    /** Callback for status changes */
+    private statusCallback: (status: ConnectionStatus) => void = () => { };
+    private currentStatus: ConnectionStatus = 'disconnected';
 
     constructor(logger: Logger) {
         this.logger = logger;
@@ -130,6 +134,7 @@ export class LocalStrategy implements ConnectionStrategy {
 
         const fullRoomName = `lan-${roomName}`;
         console.log(`[LocalStrategy] Connecting to room: ${fullRoomName} via ${signalingUrl}`);
+        this.emitStatus('connecting');
 
         try {
             this.provider = new TrysteroProvider(
@@ -156,9 +161,12 @@ export class LocalStrategy implements ConnectionStrategy {
             this.awareness.setLocalStateField('__reconnectedAt', Date.now());
 
             this.provider.on('status', (event: any) => {
+                // When we connect, explicitly update our awareness state to force a broadcast
                 if (event && event.connected === true && this.awareness) {
                     this.logger?.debug('[LocalStrategy] Connected, forcing awareness broadcast');
-                    this.awareness.setLocalStateField('__reconnectedAt', Date.now());
+                    this.emitStatus('connected');
+
+                    // Briefly set a connecting timestamp to force awareness protocol to broadcast changesField('__reconnectedAt', Date.now());
                 }
             });
 
@@ -207,6 +215,7 @@ export class LocalStrategy implements ConnectionStrategy {
 
         } catch (e) {
             console.error('[LocalStrategy] Failed to start TrysteroProvider', e);
+            this.emitStatus('error');
             throw e;
         }
     }
@@ -240,6 +249,7 @@ export class LocalStrategy implements ConnectionStrategy {
 
         this.myPeers.clear();
         this.notifyPeersChanged();
+        this.emitStatus('disconnected');
     }
 
     destroy(): void {
@@ -268,6 +278,17 @@ export class LocalStrategy implements ConnectionStrategy {
 
     onPeerUpdate(callback: (peers: PeerInfo[]) => void): void {
         this.peerUpdateCallback = callback;
+    }
+
+    onStatusChanged(callback: (status: ConnectionStatus) => void): void {
+        this.statusCallback = callback;
+    }
+
+    private emitStatus(status: ConnectionStatus) {
+        if (this.currentStatus !== status) {
+            this.currentStatus = status;
+            this.statusCallback(status);
+        }
     }
 
     getUnderlyingProvider(): any {

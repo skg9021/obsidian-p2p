@@ -11,3 +11,5 @@ export interface PeerState {
     ip?: string;
     [key: string]: any;
 }
+
+export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
