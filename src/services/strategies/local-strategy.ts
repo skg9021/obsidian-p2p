@@ -22,7 +22,6 @@ export class LocalStrategy implements ConnectionStrategy {
     // Track peers visible to THIS provider
     private myPeers: Map<number, any> = new Map();
     private peerUpdateCallback: ((peers: PeerInfo[]) => void) | null = null;
-    private activeNetworkIds: string[] = [];
 
     constructor(logger: Logger) {
         this.logger = logger;
@@ -160,10 +159,8 @@ export class LocalStrategy implements ConnectionStrategy {
             });
 
             this.provider.on('peers', (event: any) => {
-                if (event && event.length > 0) {
-                    this.activeNetworkIds = event[0].trysteroPeers || [];
-                    this.recomputePeers();
-                }
+                // Fired by y-webrtc-trystero on leave
+                this.recomputePeers();
             });
 
             // Trigger initial peer check?
@@ -192,7 +189,6 @@ export class LocalStrategy implements ConnectionStrategy {
             this.logger.log('[LocalStrategy] Disconnected');
         }
         this.myPeers.clear();
-        this.activeNetworkIds = [];
         this.notifyPeersChanged();
     }
 
@@ -235,13 +231,16 @@ export class LocalStrategy implements ConnectionStrategy {
     }
 
     private recomputePeers() {
-        if (!this.awareness) return;
+        if (!this.awareness || !this.provider || !this.provider.room) return;
 
         let stateChanged = false;
         const newPeers = new Map<number, any>();
 
+        // Dynamically get the active WebRTC Peer IDs directly from y-webrtc-trystero's room
+        const activeTrysteroIds = Array.from(this.provider.room.trysteroConns?.keys() || []);
+
         this.awareness.getStates().forEach((state, clientId) => {
-            if (state.networkId && this.activeNetworkIds.includes(state.networkId)) {
+            if (state.networkId && activeTrysteroIds.includes(state.networkId)) {
                 newPeers.set(clientId, state);
             }
         });
