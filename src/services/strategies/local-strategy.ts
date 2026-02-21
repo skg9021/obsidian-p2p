@@ -147,6 +147,15 @@ export class LocalStrategy implements ConnectionStrategy {
 
             this.provider.on('status', (event: any) => {
                 // console.log(`[LocalStrategy] Status:`, event);
+
+                // When we connect, explicitly update our awareness state to force a broadcast
+                // Trystero without BroadcastChannel may miss initial presence propagation on reconnect
+                if (event && event.connected === true && this.awareness) {
+                    this.logger?.debug('[LocalStrategy] Connected, forcing awareness broadcast');
+                    const localState = this.awareness.getLocalState() || {};
+                    // Briefly set a connecting timestamp to force awareness protocol to broadcast changes
+                    this.awareness.setLocalStateField('__reconnectedAt', Date.now());
+                }
             });
 
             // Trigger initial peer check?
