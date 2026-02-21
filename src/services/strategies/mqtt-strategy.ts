@@ -91,6 +91,21 @@ export class MqttStrategy implements ConnectionStrategy {
                 }
             );
 
+            this.provider.on('status', (event: any) => {
+                // When we connect, explicitly update our awareness state to force a broadcast
+                if (event && event.connected === true && this.awareness) {
+                    this.logger?.debug('[MqttStrategy] Connected, forcing awareness broadcast');
+
+                    // Force the actual Trystero peerId into the awareness state so we perfectly match active connections
+                    if (this.provider.room && this.provider.room.peerId) {
+                        this.awareness.setLocalStateField('networkId', this.provider.room.peerId);
+                    }
+
+                    // Briefly set a connecting timestamp to force awareness protocol to broadcast changes
+                    this.awareness.setLocalStateField('__reconnectedAt', Date.now());
+                }
+            });
+
             this.provider.on('synced', (event: any) => {
                 // console.log(`[MqttStrategy] Synced:`, event);
             });
@@ -177,8 +192,12 @@ export class MqttStrategy implements ConnectionStrategy {
         // Dynamically get the active WebRTC Peer IDs directly from y-webrtc-trystero's room
         const activeTrysteroIds = Array.from(this.provider.room.trysteroConns?.keys() || []);
 
+        this.logger.debug(`[MqttStrategy] recomputePeers: active WebRTC sockets:`, activeTrysteroIds);
+
         this.awareness.getStates().forEach((state, clientId) => {
+            this.logger.debug(`[MqttStrategy] recomputePeers: checking clientId=${clientId}, name=${state.name}, networkId=${state.networkId}`);
             if (state.networkId && activeTrysteroIds.includes(state.networkId)) {
+                this.logger.debug(`[MqttStrategy] -> MATCH for ${state.name}!`);
                 newPeers.set(clientId, state);
             }
         });
