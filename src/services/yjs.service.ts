@@ -19,6 +19,8 @@ import { PeerInfo } from './p2p-types';
 export class YjsService {
     ydoc: Y.Doc;
     yMap: Y.Map<Y.Text>;
+    /** Tombstone map: path → { deletedBy, deletedAt } for soft-delete propagation */
+    tombstones: Y.Map<any>;
     awareness: awarenessProtocol.Awareness;
     isRemoteUpdate: boolean = false;
 
@@ -31,6 +33,7 @@ export class YjsService {
     constructor(private app: App, private settings: P2PSettings) {
         this.ydoc = new Y.Doc();
         this.yMap = this.ydoc.getMap('obsidian-vault');
+        this.tombstones = this.ydoc.getMap('deleted-files');
 
         // Shared awareness instance — used by strategies
         this.awareness = new awarenessProtocol.Awareness(this.ydoc);
@@ -69,7 +72,6 @@ export class YjsService {
 
     /** Public method to re-emit the current peer list (e.g. after reconnect) */
     refreshPeerList() {
-        // Trigger manual emit from manager
         const peers = this.providerManager.getPeers();
         this.onPeersUpdated(peers);
     }
@@ -83,30 +85,37 @@ export class YjsService {
         const peer = peers.find(p => p.clientId === clientId);
         if (!peer) return null;
 
-        // Return preferred provider if 'both'
         if (peer.source === 'both') return 'local';
         if (peer.source === 'internet') return 'mqtt';
         if (peer.source === 'local') return 'local';
-        return null; // Should handle unknown?
+        return null;
     }
 
     // ─── Lifecycle ──────────────────────────────────────────────
 
     destroy() {
-        this.providerManager.destroy(); // Destroys all strategies
+        this.providerManager.destroy();
         this.awareness.destroy();
         this.ydoc.destroy();
     }
 
     // ─── Vault ↔ Yjs sync ───────────────────────────────────────
 
+    /**
+     * Soft-delete: places a tombstone in the shared CRDT so all peers
+     * move the file to trash instead of hard-deleting it.
+     */
     handleLocalDelete(file: TAbstractFile) {
         if (this.isRemoteUpdate) return;
         if (!(file instanceof TFile) || file.extension !== 'md') return;
 
-        this.log(`Deleting ${file.path} from Yjs map`);
+        this.log(`Soft-deleting ${file.path} (tombstone)`);
         this.ydoc.transact(() => {
             this.yMap.delete(file.path);
+            this.tombstones.set(file.path, {
+                deletedBy: this.settings.deviceName,
+                deletedAt: Date.now(),
+            });
         }, 'local');
     }
 
@@ -117,6 +126,12 @@ export class YjsService {
         const content = await this.app.vault.read(file);
 
         this.ydoc.transact(() => {
+            // Clear any tombstone — re-creating/editing a file un-deletes it
+            if (this.tombstones.has(file.path)) {
+                this.log(`Clearing tombstone for ${file.path} (file modified/recreated)`);
+                this.tombstones.delete(file.path);
+            }
+
             let yText = this.yMap.get(file.path);
             if (!yText) { yText = new Y.Text(); this.yMap.set(file.path, yText); }
 
@@ -131,7 +146,11 @@ export class YjsService {
     applyToDisk = debounce(async () => {
         this.isRemoteUpdate = true;
         try {
+            // 1) Apply content updates (create / modify)
             for (const [path, yText] of this.yMap.entries()) {
+                // Skip files that have a tombstone — they're pending deletion
+                if (this.tombstones.has(path)) continue;
+
                 const content = (yText as Y.Text).toString();
                 const file = this.app.vault.getAbstractFileByPath(path);
                 if (file instanceof TFile) {
@@ -142,6 +161,15 @@ export class YjsService {
                     await this.app.vault.create(path, content);
                 }
             }
+
+            // 2) Apply tombstones — move deleted files to Obsidian's trash
+            for (const [path, meta] of this.tombstones.entries()) {
+                const file = this.app.vault.getAbstractFileByPath(path);
+                if (file instanceof TFile) {
+                    this.log(`Moving ${path} to trash (deleted by ${meta.deletedBy} at ${new Date(meta.deletedAt).toLocaleString()})`);
+                    await this.app.vault.trash(file, false); // false = use Obsidian .trash/, not system trash
+                }
+            }
         } catch (e) { console.error("Sync Write Error", e); }
         finally { this.isRemoteUpdate = false; }
     }, 500, true);
@@ -150,6 +178,9 @@ export class YjsService {
         const files = this.app.vault.getMarkdownFiles();
         this.ydoc.transact(() => {
             files.forEach(async (file) => {
+                // Skip files with active tombstones
+                if (this.tombstones.has(file.path)) return;
+
                 const content = await this.app.vault.read(file);
                 let yText = this.yMap.get(file.path);
                 if (!yText) { yText = new Y.Text(); this.yMap.set(file.path, yText); }
