@@ -8,7 +8,7 @@ import { joinRoom, closeAllClients } from 'trystero/mqtt';
 import { WebrtcProvider } from 'y-webrtc';
 import * as awarenessProtocol from 'y-protocols/awareness';
 import { P2PSettings } from '../settings';
-import { joinRoom as joinLocalRoom } from './trystero-local-strategy';
+import { joinRoom as joinLocalRoom, selfId } from './trystero-local-strategy';
 import { ProviderManager } from './provider-manager.service';
 import { PeerInfo } from './p2p-types';
 
@@ -35,9 +35,10 @@ export class YjsService {
         // Shared awareness instance — used by strategies
         this.awareness = new awarenessProtocol.Awareness(this.ydoc);
 
-        // Set our own device name in awareness
+        // Set our own device name and network ID in awareness
         this.awareness.setLocalState({
             name: this.settings.deviceName,
+            networkId: selfId,
         });
 
         // Initialize Provider Manager

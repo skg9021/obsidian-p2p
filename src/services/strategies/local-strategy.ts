@@ -22,6 +22,7 @@ export class LocalStrategy implements ConnectionStrategy {
     // Track peers visible to THIS provider
     private myPeers: Map<number, any> = new Map();
     private peerUpdateCallback: ((peers: PeerInfo[]) => void) | null = null;
+    private activeNetworkIds: string[] = [];
 
     constructor(logger: Logger) {
         this.logger = logger;
@@ -158,6 +159,13 @@ export class LocalStrategy implements ConnectionStrategy {
                 }
             });
 
+            this.provider.on('peers', (event: any) => {
+                if (event && event.length > 0) {
+                    this.activeNetworkIds = event[0].trysteroPeers || [];
+                    this.recomputePeers();
+                }
+            });
+
             // Trigger initial peer check?
             // TrysteroProvider generally emits events when connected.
 
@@ -184,6 +192,7 @@ export class LocalStrategy implements ConnectionStrategy {
             this.logger.log('[LocalStrategy] Disconnected');
         }
         this.myPeers.clear();
+        this.activeNetworkIds = [];
         this.notifyPeersChanged();
     }
 
@@ -220,56 +229,38 @@ export class LocalStrategy implements ConnectionStrategy {
     }
 
     private handleAwarenessUpdate(added: number[], removed: number[], origin: any) {
-        let isFromMe = false;
+        // With Network-Layer Tracking, we don't need to guess the origin.
+        // We just recompute based on the current active WebRTC network IDs.
+        this.recomputePeers();
+    }
 
-        // Debug logging for awareness origin
-        this.logger?.debug('[LocalStrategy] Awareness update:', { added, removed, origin }, this.provider);
+    private recomputePeers() {
+        if (!this.awareness) return;
 
-        // Check origin logic similar to MqttStrategy
-        if (origin === this.provider) {
-            isFromMe = true;
-        } else if (origin && typeof origin === 'object') {
-            // Check if origin is the Room object which has a reference to the provider
-            if (origin.provider && origin.provider === this.provider) {
-                isFromMe = true;
-            } else {
-                const originRoom = origin.roomName || origin.room?.name || origin.name;
-                const myRoom = this.provider?.roomName;
+        let stateChanged = false;
+        const newPeers = new Map<number, any>();
 
-                this.logger?.trace(`[LocalStrategy] Origin check: originRoom=${originRoom}, myRoom=${myRoom}`);
+        this.awareness.getStates().forEach((state, clientId) => {
+            if (state.networkId && this.activeNetworkIds.includes(state.networkId)) {
+                newPeers.set(clientId, state);
+            }
+        });
 
-                if (originRoom && myRoom && myRoom === originRoom) {
-                    isFromMe = true;
+        if (this.myPeers.size !== newPeers.size) {
+            stateChanged = true;
+        } else {
+            newPeers.forEach((state, clientId) => {
+                const oldState = this.myPeers.get(clientId);
+                if (!oldState || JSON.stringify(oldState) !== JSON.stringify(state)) {
+                    stateChanged = true;
                 }
-            }
-        }
-
-        if (!isFromMe) {
-            this.logger?.trace('[LocalStrategy] Ignoring awareness update from other origin');
-            return;
-        }
-
-        if (this.awareness) {
-            const allStates = this.awareness.getStates();
-            if (added) {
-                added.forEach(clientId => {
-                    const state = allStates.get(clientId);
-                    if (state) this.myPeers.set(clientId, state);
-                });
-            }
-            if (removed) {
-                removed.forEach(clientId => {
-                    this.myPeers.delete(clientId);
-                });
-            }
-            // Update existing peers to reflect any metadata changes (name, ip)
-            this.myPeers.forEach((_, clientId) => {
-                const state = allStates.get(clientId);
-                if (state) this.myPeers.set(clientId, state);
             });
         }
 
-        this.notifyPeersChanged();
+        if (stateChanged) {
+            this.myPeers = newPeers;
+            this.notifyPeersChanged();
+        }
     }
 
     private notifyPeersChanged() {

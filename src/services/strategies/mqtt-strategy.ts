@@ -21,6 +21,7 @@ export class MqttStrategy implements ConnectionStrategy {
     // Track peers visible to THIS provider
     private myPeers: Map<number, any> = new Map();
     private peerUpdateCallback: ((peers: PeerInfo[]) => void) | null = null;
+    private activeNetworkIds: string[] = [];
 
     constructor(logger: Logger) {
         this.logger = logger;
@@ -95,9 +96,10 @@ export class MqttStrategy implements ConnectionStrategy {
             });
 
             this.provider.on('peers', (event: any) => {
-                // console.log(`[MqttStrategy] Trystero peers changed:`, event);
-                // The provider emits 'peers', but awareness is the source of truth for user info.
-                // We rely on awareness logic to populate 'myPeers' map.
+                if (event && event.length > 0) {
+                    this.activeNetworkIds = event[0].trysteroPeers || [];
+                    this.recomputePeers();
+                }
             });
 
         } catch (e) {
@@ -117,6 +119,7 @@ export class MqttStrategy implements ConnectionStrategy {
 
         // Clear peers tracked by this strategy
         this.myPeers.clear();
+        this.activeNetworkIds = [];
         this.notifyPeersChanged();
     }
 
@@ -153,91 +156,38 @@ export class MqttStrategy implements ConnectionStrategy {
     }
 
     private handleAwarenessUpdate(added: number[], removed: number[], origin: any) {
-        // TrysteroProvider (or y-webrtc-trystero) typically sets origin as the provider instance
-        // or an object containing room info?
-        // In the original code: `const roomName = origin?.roomName || origin?.room?.name;`
+        // With Network-Layer Tracking, we don't need to guess the origin.
+        // We just recompute based on the current active WebRTC network IDs.
+        this.recomputePeers();
+    }
 
-        // If the origin matches THIS provider's signature, we track/untrack the client IDs.
-
-        // For TrysteroProvider, we need to verify how it sets origin.
-        // Assuming it sets 'this' (the provider itself) or an object with roomName matching ours.
-
-        let isFromMe = false;
-
-        this.logger.debug('[MqttStrategy] Awareness update:', { added, removed, origin }, this.provider);
-
-        if (origin === this.provider) {
-            isFromMe = true;
-        } else if (origin && typeof origin === 'object') {
-            // Check if origin is the Room object which has a reference to the provider
-            if (origin.provider && origin.provider === this.provider) {
-                isFromMe = true;
-            } else {
-                const originRoom = origin.roomName || origin.room?.name || origin.name;
-                const myRoom = this.provider?.roomName;
-
-                this.logger.trace(`[MqttStrategy] Origin check: originRoom=${originRoom}, myRoom=${myRoom}`);
-
-                // Our room name includes 'mqtt-' prefix
-                if (originRoom && myRoom && myRoom === originRoom) {
-                    isFromMe = true;
-                }
-            }
-        }
-
-        if (!isFromMe) {
-            this.logger.trace('[MqttStrategy] Ignoring awareness update from other origin');
-            // Check implicit: if I am the ONLY provider, assume it's me? 
-            // Risky if we have multiple.
-            // But if 'origin' is null/undefined (local changes), we ignore.
-            // Remote changes usually have origin.
-            return;
-        }
-
+    private recomputePeers() {
         if (!this.awareness) return;
 
-        if (added) {
-            added.forEach(clientId => {
-                // awareness.getStates() returns map.
-                const allStates = this.awareness!.getStates();
-                const clientState = allStates.get(clientId);
-                if (clientState) {
-                    this.myPeers.set(clientId, clientState);
-                }
-            });
-        }
+        let stateChanged = false;
+        const newPeers = new Map<number, any>();
 
-        if (removed) {
-            removed.forEach(clientId => {
-                this.myPeers.delete(clientId);
-            });
-        }
-
-        // Also update existing peers states if they changed?
-        // Awareness 'change' event covers additions/removals/updates.
-        // If it's an update to existing peer, it usually comes in 'added' or 'updated'?
-        // The awareness event sig is ({ added, updated, removed }, origin)
-
-        // We should check 'updated' too.
-        // But for simply tracking "Who is connected via Me", added/removed is key.
-        // For "What is their latest state", we rely on accessing awareness.getStates() 
-
-        // Let's re-scan all 'myPeers' to ensure we have latest data (like name changes)
-        // actually we just store the ID in myPeers? 
-        // No, we store state.
-
-        // Let's safe-guard: Refill myPeers from awareness for all known IDs
-        this.myPeers.forEach((_, clientId) => {
-            const state = this.awareness!.getStates().get(clientId);
-            if (state) {
-                this.myPeers.set(clientId, state);
-            } else {
-                // Should have been removed, but just in case
-                this.myPeers.delete(clientId);
+        this.awareness.getStates().forEach((state, clientId) => {
+            if (state.networkId && this.activeNetworkIds.includes(state.networkId)) {
+                newPeers.set(clientId, state);
             }
         });
 
-        this.notifyPeersChanged();
+        if (this.myPeers.size !== newPeers.size) {
+            stateChanged = true;
+        } else {
+            newPeers.forEach((state, clientId) => {
+                const oldState = this.myPeers.get(clientId);
+                if (!oldState || JSON.stringify(oldState) !== JSON.stringify(state)) {
+                    stateChanged = true;
+                }
+            });
+        }
+
+        if (stateChanged) {
+            this.myPeers = newPeers;
+            this.notifyPeersChanged();
+        }
     }
 
     private notifyPeersChanged() {
