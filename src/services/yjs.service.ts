@@ -1,5 +1,5 @@
 import * as Y from 'yjs';
-import { App, TFile, TAbstractFile, debounce } from 'obsidian';
+import { App, TFile, TAbstractFile, debounce, Notice } from 'obsidian';
 // @ts-ignore - no types for this package
 import { TrysteroProvider } from '@winstonfassett/y-webrtc-trystero';
 // @ts-ignore
@@ -56,6 +56,15 @@ export class YjsService {
         this.ydoc.on('update', (update: Uint8Array, origin: any) => {
             if (origin !== 'local') {
                 this.applyToDisk();
+            }
+        });
+
+        // Directly observe the tombstones map so remote deletions are always processed,
+        // even if applyToDisk was recently debounced away.
+        this.tombstones.observe((event) => {
+            if (event.transaction.origin !== 'local') {
+                // Schedule after debounce period (500ms) so applyToDisk will accept the call
+                setTimeout(() => this.applyToDisk(), 600);
             }
         });
     }
@@ -186,6 +195,7 @@ export class YjsService {
                 const file = this.app.vault.getAbstractFileByPath(path);
                 if (file instanceof TFile) {
                     this.log(`Moving ${path} to trash (deleted by ${meta.deletedBy} at ${new Date(meta.deletedAt).toLocaleString()})`);
+                    new Notice(`"${path}" was deleted by ${meta.deletedBy} and moved to trash`);
                     await this.app.vault.trash(file, false);
                 }
 
