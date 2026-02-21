@@ -83,7 +83,11 @@ export function buildCursorExtension(plugin: P2PSyncPlugin): Extension {
 
         handleAwarenessChange() {
             // Dispatch dummy transaction to trigger decoration recomputation
-            this.view.dispatch({ annotations: [] });
+            // Wrap in setTimeout to avoid "Calls to EditorView.update are not allowed while an update is in progress"
+            // This happens when awareness.setLocalState is called inside update()
+            setTimeout(() => {
+                this.view.dispatch({ annotations: [] });
+            }, 0);
         }
 
         update(update: ViewUpdate) {
