@@ -123,6 +123,9 @@ export class MqttStrategy implements ConnectionStrategy {
             });
 
             this.provider.on('peers', (event: any) => {
+                // If we get any peer events, we are definitely connected to the signaling server
+                this.emitStatus('connected');
+
                 if (!this.provider?.room) return;
                 const remaining = this.provider.room.trysteroConns?.size || 0;
                 this.logger.debug(`[MqttStrategy] peers event: remaining WebRTC conns=${remaining}, tracked peers=${this.myPeers.size}`);
@@ -139,9 +142,21 @@ export class MqttStrategy implements ConnectionStrategy {
                 }
             });
 
+            // Fallback: Trystero's native connection events
+            if (this.provider.trystero) {
+                this.provider.trystero.onPeerJoin(() => {
+                    this.emitStatus('connected');
+                });
+            }
+
             // Periodic fallback: only ADDS peers, never removes.
             this.recomputeInterval = setInterval(() => {
                 if (!this.provider?.room || !this.awareness) return;
+
+                // If we have active connections, we must be connected
+                if (this.provider.room.trysteroConns?.size > 0) {
+                    this.emitStatus('connected');
+                }
                 const hasConns = (this.provider.room.trysteroConns?.size || 0) > 0;
 
                 if (hasConns && this.myPeers.size === 0) {

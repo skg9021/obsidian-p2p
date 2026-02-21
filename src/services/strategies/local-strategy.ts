@@ -171,11 +171,15 @@ export class LocalStrategy implements ConnectionStrategy {
             });
 
             this.provider.on('peers', (event: any) => {
+                // If we get any peer events, we are definitely connected to the signaling server
+                this.emitStatus('connected');
+
+                // Grace period: Wait 5 seconds before clearing local peers if WebRTC connections drop
                 if (!this.provider?.room) return;
-                const remaining = this.provider.room.trysteroConns?.size || 0;
-                this.logger.debug(`[LocalStrategy] peers event: remaining WebRTC conns=${remaining}, tracked peers=${this.myPeers.size}`);
-                // Use a grace period before clearing — trysteroConns can be transiently empty during reconnection
-                if (remaining === 0 && this.myPeers.size > 0) {
+                const remainingRaw = this.provider.room.trysteroConns?.size || 0;
+                this.logger.debug(`[LocalStrategy] peers event: remaining WebRTC conns=${remainingRaw}, tracked peers=${this.myPeers.size}`);
+
+                if (remainingRaw === 0 && this.myPeers.size > 0) {
                     setTimeout(() => {
                         if (!this.provider?.room) return;
                         const stillEmpty = (this.provider.room.trysteroConns?.size || 0) === 0;
@@ -188,12 +192,25 @@ export class LocalStrategy implements ConnectionStrategy {
                 }
             });
 
+            // Fallback: Trystero's native connection events
+            if (this.provider.trystero) {
+                this.provider.trystero.onPeerJoin(() => {
+                    this.emitStatus('connected');
+                });
+            }
+
             // Periodic fallback: if trysteroConns has active entries but myPeers is empty,
             // origin-based tracking missed the event — scan all awareness states.
             // NOTE: This interval only ADDS peers, never removes them.
             // Removal is handled by awareness `removed` events and the peers event above.
             this.recomputeInterval = setInterval(() => {
                 if (!this.provider?.room || !this.awareness) return;
+
+                // If we have active connections, we must be connected
+                if (this.provider.room.trysteroConns?.size > 0) {
+                    this.emitStatus('connected');
+                }
+
                 const hasConns = (this.provider.room.trysteroConns?.size || 0) > 0;
 
                 if (hasConns && this.myPeers.size === 0) {
