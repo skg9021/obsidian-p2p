@@ -161,15 +161,23 @@ export class MqttStrategy implements ConnectionStrategy {
             clearInterval(this.recomputeInterval);
             this.recomputeInterval = null;
         }
+
+        // Save awareness state BEFORE destroy wipes it to null
+        const savedState = this.awareness?.getLocalState();
+
         if (this.provider) {
             // @ts-ignore
-            closeAllClients(); // Close Trystero MQTT clients
+            closeAllClients();
             this.provider.destroy();
             this.provider = null;
             this.logger.log('[MqttStrategy] Disconnected');
         }
 
-        // Clear peers tracked by this strategy
+        // Restore awareness state (provider.destroy wipes it to null)
+        if (this.awareness && savedState && !this.awareness.getLocalState()) {
+            this.awareness.setLocalState(savedState);
+        }
+
         this.myPeers.clear();
         this.notifyPeersChanged();
     }

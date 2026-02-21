@@ -214,14 +214,15 @@ export class LocalStrategy implements ConnectionStrategy {
             clearInterval(this.recomputeInterval);
             this.recomputeInterval = null;
         }
+
+        // Save awareness state BEFORE destroy wipes it to null
+        const savedState = this.awareness?.getLocalState();
+
         if (this.provider) {
             try {
-                // Fix: Manually leave the room to close the socket
-                // TrysteroProvider.destroy() creates a new room but doesn't close the old one's socket
                 if (this.provider.trystero && typeof this.provider.trystero.leave === 'function') {
                     this.provider.trystero.leave();
                 }
-
                 this.provider.destroy();
             } catch (e) {
                 console.error('[LocalStrategy] Error destroying provider', e);
@@ -229,6 +230,12 @@ export class LocalStrategy implements ConnectionStrategy {
             this.provider = null;
             this.logger.log('[LocalStrategy] Disconnected');
         }
+
+        // Restore awareness state (provider.destroy wipes it to null)
+        if (this.awareness && savedState && !this.awareness.getLocalState()) {
+            this.awareness.setLocalState(savedState);
+        }
+
         this.myPeers.clear();
         this.notifyPeersChanged();
     }
