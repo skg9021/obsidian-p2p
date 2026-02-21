@@ -34,8 +34,8 @@ export class MqttStrategy implements ConnectionStrategy {
         // Listen to awareness updates to track which peers are associated with this provider
         // We do this by checking the origin of the update
         if (this.awareness) {
-            this.awareness.on('update', ({ added, removed }: any, origin: any) => {
-                this.handleAwarenessUpdate(added, removed, origin);
+            this.awareness.on('update', ({ added, removed, updated }: any, origin: any) => {
+                this.handleAwarenessUpdate([...added, ...(updated || [])], removed, origin);
             });
         }
     }
@@ -52,6 +52,15 @@ export class MqttStrategy implements ConnectionStrategy {
 
         if (this.provider) {
             this.disconnect();
+        }
+
+        // CRITICAL: provider.destroy() wipes awareness state to null.
+        // Restore it so the clock bump below actually works.
+        if (this.awareness && !this.awareness.getLocalState()) {
+            this.logger.debug('[MqttStrategy] Restoring awareness state after disconnect wipe');
+            this.awareness.setLocalState({
+                name: settings.deviceName,
+            });
         }
 
         const relayUrls = settings.discoveryServer
@@ -91,30 +100,12 @@ export class MqttStrategy implements ConnectionStrategy {
                 }
             );
 
-            // Force the actual Trystero peerId into the awareness state so we perfectly match active connections
-            if (this.provider.room && this.provider.room.peerId) {
-                this.logger.debug(`[MqttStrategy] Injecting true Trystero identity into awareness: ${this.provider.room.peerId}`);
-                const current = this.awareness.getLocalState() || {};
-                const name = current.name || settings.deviceName;
-                const networkIds = current.networkIds || {};
-                networkIds.mqtt = this.provider.room.peerId;
-
-                this.awareness.setLocalState({
-                    ...current,
-                    name: name,
-                    networkIds: networkIds,
-                    __reconnectedAt: Date.now()
-                });
-            } else {
-                this.logger.error('[MqttStrategy] Provider created but room.peerId is missing!');
-            }
+            // Bump the awareness clock so reconnecting peers see a higher clock
+            this.awareness.setLocalStateField('__reconnectedAt', Date.now());
 
             this.provider.on('status', (event: any) => {
-                // When we connect, explicitly update our awareness state to force a broadcast
                 if (event && event.connected === true && this.awareness) {
                     this.logger?.debug('[MqttStrategy] Connected, forcing awareness broadcast');
-
-                    // Briefly set a connecting timestamp to force awareness protocol to broadcast changes
                     this.awareness.setLocalStateField('__reconnectedAt', Date.now());
                 }
             });
@@ -124,14 +115,39 @@ export class MqttStrategy implements ConnectionStrategy {
             });
 
             this.provider.on('peers', (event: any) => {
-                // Fired by y-webrtc-trystero on leave
-                this.recomputePeers();
+                if (!this.provider?.room) return;
+                const remaining = this.provider.room.trysteroConns?.size || 0;
+                this.logger.debug(`[MqttStrategy] peers event: remaining WebRTC conns=${remaining}, tracked peers=${this.myPeers.size}`);
+                if (remaining === 0 && this.myPeers.size > 0) {
+                    this.logger.debug('[MqttStrategy] All WebRTC connections closed, clearing peers');
+                    this.myPeers.clear();
+                    this.notifyPeersChanged();
+                }
             });
 
-            // Fallback: y-webrtc-trystero often drops the on('peers') propagation on JOIN.
-            // We use a light interval to guarantee our UI tracks the active WebRTC Sockets transparently.
+            // Periodic fallback: covers two cases:
+            // 1) trysteroConns empty but myPeers stale → clear peers
+            // 2) trysteroConns active but myPeers empty → origin-based tracking missed → scan all awareness states
             this.recomputeInterval = setInterval(() => {
-                this.recomputePeers();
+                if (!this.provider?.room || !this.awareness) return;
+                const hasConns = (this.provider.room.trysteroConns?.size || 0) > 0;
+
+                if (!hasConns && this.myPeers.size > 0) {
+                    this.logger.debug('[MqttStrategy] Safety net: clearing stale peers');
+                    this.myPeers.clear();
+                    this.notifyPeersChanged();
+                } else if (hasConns && this.myPeers.size === 0) {
+                    let changed = false;
+                    this.awareness!.getStates().forEach((state, clientId) => {
+                        if (clientId === this.awareness!.clientID) return;
+                        if (!this.myPeers.has(clientId) && state.name) {
+                            this.logger.debug(`[MqttStrategy] Fallback scan: adding peer ${state.name} (clientId=${clientId})`);
+                            this.myPeers.set(clientId, state);
+                            changed = true;
+                        }
+                    });
+                    if (changed) this.notifyPeersChanged();
+                }
             }, 2000);
 
         } catch (e) {
@@ -190,47 +206,38 @@ export class MqttStrategy implements ConnectionStrategy {
         return this.provider;
     }
 
-    private handleAwarenessUpdate(added: number[], removed: number[], origin: any) {
-        // With Network-Layer Tracking, we don't need to guess the origin.
-        // We just recompute based on the current active WebRTC network IDs.
-        this.recomputePeers();
-    }
+    private handleAwarenessUpdate(addedOrUpdated: number[], removed: number[], origin: any) {
+        if (!this.provider || !this.awareness) return;
 
-    private recomputePeers() {
-        if (!this.awareness || !this.provider || !this.provider.room) return;
+        let changed = false;
 
-        let stateChanged = false;
-        const newPeers = new Map<number, any>();
-
-        // Dynamically get the active WebRTC Peer IDs directly from y-webrtc-trystero's room
-        const activeTrysteroIds = Array.from(this.provider.room.trysteroConns?.keys() || []);
-
-        this.logger.debug(`[MqttStrategy] recomputePeers: active WebRTC sockets:`, activeTrysteroIds);
-
-        this.awareness.getStates().forEach((state, clientId) => {
-            const networkId = state.networkIds?.mqtt;
-            this.logger.debug(`[MqttStrategy] recomputePeers: checking clientId=${clientId}, name=${state.name}, networkId=${networkId}`);
-            if (networkId && activeTrysteroIds.includes(networkId)) {
-                this.logger.debug(`[MqttStrategy] -> MATCH for ${state.name}!`);
-                newPeers.set(clientId, state);
-            }
-        });
-
-        if (this.myPeers.size !== newPeers.size) {
-            stateChanged = true;
-        } else {
-            newPeers.forEach((state, clientId) => {
-                const oldState = this.myPeers.get(clientId);
-                if (!oldState || JSON.stringify(oldState) !== JSON.stringify(state)) {
-                    stateChanged = true;
+        // Only track peers whose awareness updates arrived via OUR provider's WebRTC channel.
+        // y-webrtc-trystero passes `room` as origin when applying awareness from WebRTC data.
+        if (origin === this.provider.room) {
+            for (const clientId of addedOrUpdated) {
+                if (clientId === this.awareness.clientID) continue; // Skip self
+                const state = this.awareness.getStates().get(clientId);
+                if (state) {
+                    const prev = this.myPeers.get(clientId);
+                    if (!prev || JSON.stringify(prev) !== JSON.stringify(state)) {
+                        this.logger.debug(`[MqttStrategy] Peer ${state.name || clientId} tracked via origin (clientId=${clientId})`);
+                        this.myPeers.set(clientId, state);
+                        changed = true;
+                    }
                 }
-            });
+            }
         }
 
-        if (stateChanged) {
-            this.myPeers = newPeers;
-            this.notifyPeersChanged();
+        // Handle removals regardless of origin (peer is globally gone)
+        for (const clientId of removed) {
+            if (this.myPeers.has(clientId)) {
+                this.logger.debug(`[MqttStrategy] Peer removed (clientId=${clientId})`);
+                this.myPeers.delete(clientId);
+                changed = true;
+            }
         }
+
+        if (changed) this.notifyPeersChanged();
     }
 
     private notifyPeersChanged() {

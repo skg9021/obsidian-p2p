@@ -33,7 +33,7 @@ export class LocalStrategy implements ConnectionStrategy {
         this.awareness = awareness;
         if (this.awareness) {
             this.awareness.on('update', ({ added, removed, updated }: any, origin: any) => {
-                this.handleAwarenessUpdate(added, removed, origin);
+                this.handleAwarenessUpdate([...added, ...(updated || [])], removed, origin);
             });
         }
         this.logger.log('[LocalStrategy] Initialized with awareness: ', this.awareness);
@@ -118,10 +118,15 @@ export class LocalStrategy implements ConnectionStrategy {
         }
         if (this.provider) this.disconnect();
 
-        // const signalingUrl = options?.signalingUrl; // This line is now redundant
-        // const password = options?.password; // This line is now redundant
-
-
+        // CRITICAL: provider.destroy() wipes awareness state to null.
+        // Restore it so the clock bump below actually works and
+        // TrysteroConn can broadcast a valid state to the remote peer.
+        if (this.awareness && !this.awareness.getLocalState()) {
+            this.logger.debug('[LocalStrategy] Restoring awareness state after disconnect wipe');
+            this.awareness.setLocalState({
+                name: settings.deviceName,
+            });
+        }
 
         const fullRoomName = `lan-${roomName}`;
         console.log(`[LocalStrategy] Connecting to room: ${fullRoomName} via ${signalingUrl}`);
@@ -141,48 +146,58 @@ export class LocalStrategy implements ConnectionStrategy {
                         }, roomId);
                     },
                     awareness: this.awareness,
-                    filterBcConns: false, // We rely on doc sync, avoiding broadcast channel duplicate complications
+                    filterBcConns: false,
                     disableBc: true,
                 }
             );
 
-            // Force the actual Trystero peerId into the awareness state so we perfectly match active connections
-            if (this.provider.room && this.provider.room.peerId) {
-                this.logger.debug(`[LocalStrategy] Injecting true Trystero identity into awareness: ${this.provider.room.peerId}`);
-                const current = this.awareness.getLocalState() || {};
-                const name = current.name || settings.deviceName;
-                const networkIds = current.networkIds || {};
-                networkIds.local = this.provider.room.peerId;
-
-                this.awareness.setLocalState({
-                    ...current,
-                    name: name,
-                    networkIds: networkIds,
-                    __reconnectedAt: Date.now()
-                });
-            } else {
-                this.logger.error('[LocalStrategy] Provider created but room.peerId is missing!');
-            }
+            // Bump the awareness clock so reconnecting peers see a higher clock
+            // and fire an awareness update event (which triggers origin-based tracking).
+            this.awareness.setLocalStateField('__reconnectedAt', Date.now());
 
             this.provider.on('status', (event: any) => {
-                // When we connect, explicitly update our awareness state to force a broadcast
-                // Trystero without BroadcastChannel may miss initial presence propagation on reconnect
                 if (event && event.connected === true && this.awareness) {
                     this.logger?.debug('[LocalStrategy] Connected, forcing awareness broadcast');
-                    // Briefly set a connecting timestamp to force awareness protocol to broadcast changes
                     this.awareness.setLocalStateField('__reconnectedAt', Date.now());
                 }
             });
 
             this.provider.on('peers', (event: any) => {
-                // Fired by y-webrtc-trystero on leave
-                this.recomputePeers();
+                if (!this.provider?.room) return;
+                const remaining = this.provider.room.trysteroConns?.size || 0;
+                this.logger.debug(`[LocalStrategy] peers event: remaining WebRTC conns=${remaining}, tracked peers=${this.myPeers.size}`);
+                if (remaining === 0 && this.myPeers.size > 0) {
+                    this.logger.debug('[LocalStrategy] All WebRTC connections closed, clearing peers');
+                    this.myPeers.clear();
+                    this.notifyPeersChanged();
+                }
             });
 
-            // Fallback: y-webrtc-trystero often drops the on('peers') propagation on JOIN.
-            // We use a light interval to guarantee our UI tracks the active WebRTC Sockets transparently.
+            // Periodic fallback: covers two cases:
+            // 1) trysteroConns empty but myPeers stale → clear peers
+            // 2) trysteroConns active but myPeers empty → origin-based tracking missed → scan all awareness states
             this.recomputeInterval = setInterval(() => {
-                this.recomputePeers();
+                if (!this.provider?.room || !this.awareness) return;
+                const hasConns = (this.provider.room.trysteroConns?.size || 0) > 0;
+
+                if (!hasConns && this.myPeers.size > 0) {
+                    // All WebRTC gone, clear stale peers
+                    this.logger.debug('[LocalStrategy] Safety net: clearing stale peers');
+                    this.myPeers.clear();
+                    this.notifyPeersChanged();
+                } else if (hasConns && this.myPeers.size === 0) {
+                    // Active connections but no tracked peers — origin tracking missed the event
+                    let changed = false;
+                    this.awareness!.getStates().forEach((state, clientId) => {
+                        if (clientId === this.awareness!.clientID) return;
+                        if (!this.myPeers.has(clientId) && state.name) {
+                            this.logger.debug(`[LocalStrategy] Fallback scan: adding peer ${state.name} (clientId=${clientId})`);
+                            this.myPeers.set(clientId, state);
+                            changed = true;
+                        }
+                    });
+                    if (changed) this.notifyPeersChanged();
+                }
             }, 2000);
 
             // Trigger initial peer check?
@@ -250,47 +265,38 @@ export class LocalStrategy implements ConnectionStrategy {
         return this.provider;
     }
 
-    private handleAwarenessUpdate(added: number[], removed: number[], origin: any) {
-        // With Network-Layer Tracking, we don't need to guess the origin.
-        // We just recompute based on the current active WebRTC network IDs.
-        this.recomputePeers();
-    }
+    private handleAwarenessUpdate(addedOrUpdated: number[], removed: number[], origin: any) {
+        if (!this.provider || !this.awareness) return;
 
-    private recomputePeers() {
-        if (!this.awareness || !this.provider || !this.provider.room) return;
+        let changed = false;
 
-        let stateChanged = false;
-        const newPeers = new Map<number, any>();
-
-        // Dynamically get the active WebRTC Peer IDs directly from y-webrtc-trystero's room
-        const activeTrysteroIds = Array.from(this.provider.room.trysteroConns?.keys() || []);
-
-        this.logger.debug(`[LocalStrategy] recomputePeers: active WebRTC sockets:`, activeTrysteroIds);
-
-        this.awareness.getStates().forEach((state, clientId) => {
-            const networkId = state.networkIds?.local;
-            this.logger.debug(`[LocalStrategy] recomputePeers: checking clientId=${clientId}, name=${state.name}, networkId=${networkId}`);
-            if (networkId && activeTrysteroIds.includes(networkId)) {
-                this.logger.debug(`[LocalStrategy] -> MATCH for ${state.name}!`);
-                newPeers.set(clientId, state);
-            }
-        });
-
-        if (this.myPeers.size !== newPeers.size) {
-            stateChanged = true;
-        } else {
-            newPeers.forEach((state, clientId) => {
-                const oldState = this.myPeers.get(clientId);
-                if (!oldState || JSON.stringify(oldState) !== JSON.stringify(state)) {
-                    stateChanged = true;
+        // Only track peers whose awareness updates arrived via OUR provider's WebRTC channel.
+        // y-webrtc-trystero passes `room` as origin when applying awareness from WebRTC data.
+        if (origin === this.provider.room) {
+            for (const clientId of addedOrUpdated) {
+                if (clientId === this.awareness.clientID) continue; // Skip self
+                const state = this.awareness.getStates().get(clientId);
+                if (state) {
+                    const prev = this.myPeers.get(clientId);
+                    if (!prev || JSON.stringify(prev) !== JSON.stringify(state)) {
+                        this.logger.debug(`[LocalStrategy] Peer ${state.name || clientId} tracked via origin (clientId=${clientId})`);
+                        this.myPeers.set(clientId, state);
+                        changed = true;
+                    }
                 }
-            });
+            }
         }
 
-        if (stateChanged) {
-            this.myPeers = newPeers;
-            this.notifyPeersChanged();
+        // Handle removals regardless of origin (peer is globally gone)
+        for (const clientId of removed) {
+            if (this.myPeers.has(clientId)) {
+                this.logger.debug(`[LocalStrategy] Peer removed (clientId=${clientId})`);
+                this.myPeers.delete(clientId);
+                changed = true;
+            }
         }
+
+        if (changed) this.notifyPeersChanged();
     }
 
     private notifyPeersChanged() {

@@ -35,10 +35,9 @@ export class YjsService {
         // Shared awareness instance — used by strategies
         this.awareness = new awarenessProtocol.Awareness(this.ydoc);
 
-        // Set our own device        // Setting up local client state
+        // Set our own device name in awareness
         this.awareness.setLocalState({
             name: this.settings.deviceName,
-            // networkId will be injected by the ConnectionStrategies once they instantiate Trystero
         });
 
         // Initialize Provider Manager
