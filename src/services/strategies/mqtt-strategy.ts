@@ -91,15 +91,18 @@ export class MqttStrategy implements ConnectionStrategy {
                 }
             );
 
+            // Force the actual Trystero peerId into the awareness state so we perfectly match active connections
+            if (this.provider.room && this.provider.room.peerId) {
+                this.logger.debug(`[MqttStrategy] Injecting true Trystero identity into awareness: ${this.provider.room.peerId}`);
+                this.awareness.setLocalStateField('networkId', this.provider.room.peerId);
+            } else {
+                this.logger.error('[MqttStrategy] Provider created but room.peerId is missing!');
+            }
+
             this.provider.on('status', (event: any) => {
                 // When we connect, explicitly update our awareness state to force a broadcast
                 if (event && event.connected === true && this.awareness) {
                     this.logger?.debug('[MqttStrategy] Connected, forcing awareness broadcast');
-
-                    // Force the actual Trystero peerId into the awareness state so we perfectly match active connections
-                    if (this.provider.room && this.provider.room.peerId) {
-                        this.awareness.setLocalStateField('networkId', this.provider.room.peerId);
-                    }
 
                     // Briefly set a connecting timestamp to force awareness protocol to broadcast changes
                     this.awareness.setLocalStateField('__reconnectedAt', Date.now());
