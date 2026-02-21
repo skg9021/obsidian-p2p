@@ -15,6 +15,7 @@ export interface P2PSettings {
     enableDebugLogs: boolean;
     debugLevel: 'info' | 'debug' | 'trace'; // Added logging level
     enableMqttDiscovery: boolean;
+    userColor: string;
 }
 
 export const DEFAULT_SETTINGS: P2PSettings = {
@@ -30,7 +31,8 @@ export const DEFAULT_SETTINGS: P2PSettings = {
     localServerAddress: 'ws://localhost:8080',
     enableDebugLogs: false,
     debugLevel: 'info', // Default level
-    enableMqttDiscovery: false
+    enableMqttDiscovery: false,
+    userColor: '#' + Math.floor(Math.random() * 16777215).toString(16).padStart(6, '0')
 }
 
 export class P2PSyncSettingTab extends PluginSettingTab {
@@ -113,6 +115,19 @@ export class P2PSyncSettingTab extends PluginSettingTab {
                 .onChange(async (value) => {
                     this.plugin.settings.secretKey = value;
                     await this.plugin.saveSettingsDebounced();
+                }));
+
+        new Setting(containerEl)
+            .setName('User Color')
+            .setDesc('Color used for your live cursor')
+            .addColorPicker(color => color
+                .setValue(this.plugin.settings.userColor)
+                .onChange(async (value) => {
+                    this.plugin.settings.userColor = value;
+                    await this.plugin.saveSettingsDebounced();
+                    if (this.plugin.yjsService) {
+                        this.plugin.yjsService.awareness.setLocalStateField('color', value);
+                    }
                 }));
 
         // ─── Local Network ───────────────────────────────────────

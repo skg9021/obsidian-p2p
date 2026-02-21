@@ -44,6 +44,7 @@ export class YjsService {
         // Set our own device name in awareness
         this.awareness.setLocalState({
             name: this.settings.deviceName,
+            color: this.settings.userColor,
         });
 
         // Initialize Provider Manager
