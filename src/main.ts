@@ -242,8 +242,9 @@ export default class P2PSyncPlugin extends Plugin {
 
     async handleLocalDelete(file: TAbstractFile) {
         if (!(file instanceof TFile)) return;
-        // this.logger.log(`Local file deleted: ${file.path}`);
-        if (file.extension !== 'md') {
+        if (file.extension === 'md') {
+            this.yjsService.handleLocalDelete(file);
+        } else {
             this.fileTransferService.handleLocalDelete(file);
         }
     }

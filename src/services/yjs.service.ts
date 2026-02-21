@@ -100,6 +100,16 @@ export class YjsService {
 
     // ─── Vault ↔ Yjs sync ───────────────────────────────────────
 
+    handleLocalDelete(file: TAbstractFile) {
+        if (this.isRemoteUpdate) return;
+        if (!(file instanceof TFile) || file.extension !== 'md') return;
+
+        this.log(`Deleting ${file.path} from Yjs map`);
+        this.ydoc.transact(() => {
+            this.yMap.delete(file.path);
+        }, 'local');
+    }
+
     async handleLocalModify(file: TAbstractFile) {
         if (this.isRemoteUpdate) return;
         if (!(file instanceof TFile) || file.extension !== 'md') return;
