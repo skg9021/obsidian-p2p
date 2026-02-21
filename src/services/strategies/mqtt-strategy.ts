@@ -119,24 +119,24 @@ export class MqttStrategy implements ConnectionStrategy {
                 const remaining = this.provider.room.trysteroConns?.size || 0;
                 this.logger.debug(`[MqttStrategy] peers event: remaining WebRTC conns=${remaining}, tracked peers=${this.myPeers.size}`);
                 if (remaining === 0 && this.myPeers.size > 0) {
-                    this.logger.debug('[MqttStrategy] All WebRTC connections closed, clearing peers');
-                    this.myPeers.clear();
-                    this.notifyPeersChanged();
+                    setTimeout(() => {
+                        if (!this.provider?.room) return;
+                        const stillEmpty = (this.provider.room.trysteroConns?.size || 0) === 0;
+                        if (stillEmpty && this.myPeers.size > 0) {
+                            this.logger.debug('[MqttStrategy] All WebRTC connections confirmed closed, clearing peers');
+                            this.myPeers.clear();
+                            this.notifyPeersChanged();
+                        }
+                    }, 5000);
                 }
             });
 
-            // Periodic fallback: covers two cases:
-            // 1) trysteroConns empty but myPeers stale → clear peers
-            // 2) trysteroConns active but myPeers empty → origin-based tracking missed → scan all awareness states
+            // Periodic fallback: only ADDS peers, never removes.
             this.recomputeInterval = setInterval(() => {
                 if (!this.provider?.room || !this.awareness) return;
                 const hasConns = (this.provider.room.trysteroConns?.size || 0) > 0;
 
-                if (!hasConns && this.myPeers.size > 0) {
-                    this.logger.debug('[MqttStrategy] Safety net: clearing stale peers');
-                    this.myPeers.clear();
-                    this.notifyPeersChanged();
-                } else if (hasConns && this.myPeers.size === 0) {
+                if (hasConns && this.myPeers.size === 0) {
                     let changed = false;
                     this.awareness!.getStates().forEach((state, clientId) => {
                         if (clientId === this.awareness!.clientID) return;

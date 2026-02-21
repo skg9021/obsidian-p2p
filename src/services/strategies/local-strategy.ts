@@ -166,27 +166,29 @@ export class LocalStrategy implements ConnectionStrategy {
                 if (!this.provider?.room) return;
                 const remaining = this.provider.room.trysteroConns?.size || 0;
                 this.logger.debug(`[LocalStrategy] peers event: remaining WebRTC conns=${remaining}, tracked peers=${this.myPeers.size}`);
+                // Use a grace period before clearing — trysteroConns can be transiently empty during reconnection
                 if (remaining === 0 && this.myPeers.size > 0) {
-                    this.logger.debug('[LocalStrategy] All WebRTC connections closed, clearing peers');
-                    this.myPeers.clear();
-                    this.notifyPeersChanged();
+                    setTimeout(() => {
+                        if (!this.provider?.room) return;
+                        const stillEmpty = (this.provider.room.trysteroConns?.size || 0) === 0;
+                        if (stillEmpty && this.myPeers.size > 0) {
+                            this.logger.debug('[LocalStrategy] All WebRTC connections confirmed closed, clearing peers');
+                            this.myPeers.clear();
+                            this.notifyPeersChanged();
+                        }
+                    }, 5000);
                 }
             });
 
-            // Periodic fallback: covers two cases:
-            // 1) trysteroConns empty but myPeers stale → clear peers
-            // 2) trysteroConns active but myPeers empty → origin-based tracking missed → scan all awareness states
+            // Periodic fallback: if trysteroConns has active entries but myPeers is empty,
+            // origin-based tracking missed the event — scan all awareness states.
+            // NOTE: This interval only ADDS peers, never removes them.
+            // Removal is handled by awareness `removed` events and the peers event above.
             this.recomputeInterval = setInterval(() => {
                 if (!this.provider?.room || !this.awareness) return;
                 const hasConns = (this.provider.room.trysteroConns?.size || 0) > 0;
 
-                if (!hasConns && this.myPeers.size > 0) {
-                    // All WebRTC gone, clear stale peers
-                    this.logger.debug('[LocalStrategy] Safety net: clearing stale peers');
-                    this.myPeers.clear();
-                    this.notifyPeersChanged();
-                } else if (hasConns && this.myPeers.size === 0) {
-                    // Active connections but no tracked peers — origin tracking missed the event
+                if (hasConns && this.myPeers.size === 0) {
                     let changed = false;
                     this.awareness!.getStates().forEach((state, clientId) => {
                         if (clientId === this.awareness!.clientID) return;
