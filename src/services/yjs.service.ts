@@ -171,12 +171,14 @@ export class YjsService {
             }
 
             let yText = this.yMap.get(file.path);
-            if (!yText) { yText = new Y.Text(); this.yMap.set(file.path, yText); }
+            if (!yText) {
+                yText = new Y.Text();
+                this.yMap.set(file.path, yText);
+            }
 
             const yContent = yText.toString();
             if (yContent !== content) {
-                yText.delete(0, yText.length);
-                yText.insert(0, content);
+                this.updateYText(yText, content);
             }
         }, 'local');
     }
@@ -195,6 +197,15 @@ export class YjsService {
                 const file = this.app.vault.getAbstractFileByPath(path);
                 if (file instanceof TFile) {
                     const current = await this.app.vault.read(file);
+
+                    // Race condition guard: If Yjs gives us an empty string but the local file 
+                    // has content, it's likely a CRDT initialization sync delay. Since we use
+                    // tombstones for explicit deletions, a blank yText is almost certainly a sync artifact.
+                    if (content === '' && current.length > 0) {
+                        this.log(`Ignoring empty CRDT update for ${path} (local length: ${current.length}) to prevent blanking`);
+                        continue;
+                    }
+
                     if (current !== content) await this.app.vault.modify(file, content);
                 } else if (!file) {
                     await this.ensureFolder(path);
@@ -231,10 +242,53 @@ export class YjsService {
 
                 const content = await this.app.vault.read(file);
                 let yText = this.yMap.get(file.path);
-                if (!yText) { yText = new Y.Text(); this.yMap.set(file.path, yText); }
-                if (yText.toString() !== content) { yText.delete(0, yText.length); yText.insert(0, content); }
+
+                if (!yText) {
+                    yText = new Y.Text();
+                    this.yMap.set(file.path, yText);
+                }
+
+                if (yText.toString() !== content) {
+                    this.updateYText(yText, content);
+                }
             });
         }, 'local');
+    }
+
+    /**
+     * Updates a Y.Text object with new content by computing a fast prefix/suffix diff.
+     * This prevents sending the entire document over the network on every keystroke,
+     * which can buffer overflow and stall WebRTC DataChannels.
+     */
+    private updateYText(yText: Y.Text, newContent: string) {
+        const oldContent = yText.toString();
+        if (oldContent === newContent) return;
+
+        // Find common prefix
+        let start = 0;
+        while (start < oldContent.length && start < newContent.length && oldContent[start] === newContent[start]) {
+            start++;
+        }
+
+        // Find common suffix
+        let end = 0;
+        while (
+            end < oldContent.length - start &&
+            end < newContent.length - start &&
+            oldContent[oldContent.length - 1 - end] === newContent[newContent.length - 1 - end]
+        ) {
+            end++;
+        }
+
+        const deleteLength = oldContent.length - start - end;
+        if (deleteLength > 0) {
+            yText.delete(start, deleteLength);
+        }
+
+        const insertString = newContent.substring(start, newContent.length - end);
+        if (insertString.length > 0) {
+            yText.insert(start, insertString);
+        }
     }
 
     async ensureFolder(path: string) {
