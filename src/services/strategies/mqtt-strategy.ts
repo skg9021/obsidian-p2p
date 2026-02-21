@@ -94,7 +94,17 @@ export class MqttStrategy implements ConnectionStrategy {
             // Force the actual Trystero peerId into the awareness state so we perfectly match active connections
             if (this.provider.room && this.provider.room.peerId) {
                 this.logger.debug(`[MqttStrategy] Injecting true Trystero identity into awareness: ${this.provider.room.peerId}`);
-                this.awareness.setLocalStateField('networkId', this.provider.room.peerId);
+                const current = this.awareness.getLocalState() || {};
+                const name = current.name || settings.deviceName;
+                const networkIds = current.networkIds || {};
+                networkIds.mqtt = this.provider.room.peerId;
+
+                this.awareness.setLocalState({
+                    ...current,
+                    name: name,
+                    networkIds: networkIds,
+                    __reconnectedAt: Date.now()
+                });
             } else {
                 this.logger.error('[MqttStrategy] Provider created but room.peerId is missing!');
             }
@@ -198,8 +208,9 @@ export class MqttStrategy implements ConnectionStrategy {
         this.logger.debug(`[MqttStrategy] recomputePeers: active WebRTC sockets:`, activeTrysteroIds);
 
         this.awareness.getStates().forEach((state, clientId) => {
-            this.logger.debug(`[MqttStrategy] recomputePeers: checking clientId=${clientId}, name=${state.name}, networkId=${state.networkId}`);
-            if (state.networkId && activeTrysteroIds.includes(state.networkId)) {
+            const networkId = state.networkIds?.mqtt;
+            this.logger.debug(`[MqttStrategy] recomputePeers: checking clientId=${clientId}, name=${state.name}, networkId=${networkId}`);
+            if (networkId && activeTrysteroIds.includes(networkId)) {
                 this.logger.debug(`[MqttStrategy] -> MATCH for ${state.name}!`);
                 newPeers.set(clientId, state);
             }

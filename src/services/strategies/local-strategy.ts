@@ -149,7 +149,17 @@ export class LocalStrategy implements ConnectionStrategy {
             // Force the actual Trystero peerId into the awareness state so we perfectly match active connections
             if (this.provider.room && this.provider.room.peerId) {
                 this.logger.debug(`[LocalStrategy] Injecting true Trystero identity into awareness: ${this.provider.room.peerId}`);
-                this.awareness.setLocalStateField('networkId', this.provider.room.peerId);
+                const current = this.awareness.getLocalState() || {};
+                const name = current.name || settings.deviceName;
+                const networkIds = current.networkIds || {};
+                networkIds.local = this.provider.room.peerId;
+
+                this.awareness.setLocalState({
+                    ...current,
+                    name: name,
+                    networkIds: networkIds,
+                    __reconnectedAt: Date.now()
+                });
             } else {
                 this.logger.error('[LocalStrategy] Provider created but room.peerId is missing!');
             }
@@ -258,8 +268,9 @@ export class LocalStrategy implements ConnectionStrategy {
         this.logger.debug(`[LocalStrategy] recomputePeers: active WebRTC sockets:`, activeTrysteroIds);
 
         this.awareness.getStates().forEach((state, clientId) => {
-            this.logger.debug(`[LocalStrategy] recomputePeers: checking clientId=${clientId}, name=${state.name}, networkId=${state.networkId}`);
-            if (state.networkId && activeTrysteroIds.includes(state.networkId)) {
+            const networkId = state.networkIds?.local;
+            this.logger.debug(`[LocalStrategy] recomputePeers: checking clientId=${clientId}, name=${state.name}, networkId=${networkId}`);
+            if (networkId && activeTrysteroIds.includes(networkId)) {
                 this.logger.debug(`[LocalStrategy] -> MATCH for ${state.name}!`);
                 newPeers.set(clientId, state);
             }
