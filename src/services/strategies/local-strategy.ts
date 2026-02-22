@@ -50,14 +50,7 @@ export class LocalStrategy implements ConnectionStrategy {
         let shouldConnect = false;
         let signalingUrl = '';
 
-        // Mobile cannot host
-        const canHost = typeof process !== 'undefined' && !('isMobile' in process.versions); // Simple check, or pass Platform via settings/init
-        // Actually we passed Platform in main.ts logic. 
-        // Let's rely on settings being passed correctly or check Platform here if possible. 
-        // We don't have direct access to 'Platform' from obsidian here unless we import it.
-        // But we are in a strategy file. We can import { Platform } from 'obsidian' if needed, or rely on passed context.
-        // For now, let's assume 'settings' contains everything or we import Platform.
-        // Import Platform is best.
+        // Host check uses Platform.isMobile (imported from obsidian) — see line below
 
         // Host Mode
         // We need to know if we successfully started the server? 
