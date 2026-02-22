@@ -159,7 +159,7 @@ export class LocalServerService {
                                 }
                                 this.topics.get(topicName)!.add(ws);
                                 subscribedTopics.add(topicName);
-                                this.log(`Peer subscribed to topic: ${topicName}`);
+                                this.log(`Peer ${remoteAddr} subscribed to topic: ${topicName} (${this.topics.get(topicName)!.size} subscribers)`);
                             });
                             break;
 
@@ -177,6 +177,7 @@ export class LocalServerService {
                         case 'publish':
                             if (message.topic) {
                                 const receivers = this.topics.get(message.topic);
+                                this.log(`Publish to topic ${message.topic}: ${receivers ? receivers.size : 0} subscriber(s), sender=${message.sender || remoteAddr}`);
                                 if (receivers) {
                                     message.clients = receivers.size;
                                     const data = JSON.stringify(message);

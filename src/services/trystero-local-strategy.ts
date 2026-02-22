@@ -91,12 +91,15 @@ export const joinRoom = strategy({
 
                         // 1. Resend active subscriptions (Critical for re-connect)
                         if (activeSubscriptions.size > 0) {
-                            console.log(`[Trystero Local] Restoring ${activeSubscriptions.size} subscriptions`);
+                            console.log(`[Trystero Local] Restoring ${activeSubscriptions.size} subscriptions:`, Array.from(activeSubscriptions));
                             const topics = Array.from(activeSubscriptions);
                             internalWs?.send(JSON.stringify({ type: 'subscribe', topics }));
+                        } else {
+                            console.log('[Trystero Local] No active subscriptions to restore on open');
                         }
 
                         // 2. Flush queue
+                        console.log(`[Trystero Local] Flushing ${messageQueue.length} queued messages`);
                         while (messageQueue.length > 0) {
                             const data = messageQueue.shift();
                             internalWs?.send(typeof data === 'string' ? data : JSON.stringify(data));
@@ -107,6 +110,10 @@ export const joinRoom = strategy({
                     });
 
                     internalWs.addEventListener('message', (event) => {
+                        try {
+                            const parsed = JSON.parse(event.data);
+                            console.log(`[Trystero Local] WS message received: type=${parsed.type}, topic=${parsed.topic || 'N/A'}, sender=${parsed.sender || 'N/A'}`);
+                        } catch { /* non-JSON */ }
                         (listeners['message'] || []).forEach(l => l(event));
                     });
 
@@ -159,6 +166,7 @@ export const joinRoom = strategy({
         // Send subscribe message
         const send = (msg: SignalMessage) => ws.send(JSON.stringify(msg));
 
+        console.log(`[Trystero Local] subscribe() called — rootTopic=${rootTopic}, selfTopic=${selfTopic}`);
         send({ type: 'subscribe', topics: [rootTopic, selfTopic] });
 
         const handler = (event: MessageEvent) => {
@@ -167,17 +175,13 @@ export const joinRoom = strategy({
 
                 if (msg.type === 'publish' && msg.topic) {
                     // Check if this message is relevant to our subscribed topics
-                    if (msg.topic === rootTopic || msg.topic === selfTopic) {
-                        // Trystero expects onMessage(topic, data, sender)
-                        // where 'data' is the application payload (wrapped in msg.data)
-                        // and 'sender' is a function to reply to the sender (or the senderId in some contexts, but mostly reply func)
-                        // We use the 'data' property to avoid collision with our 'type'='publish'.
+                    const isRelevant = msg.topic === rootTopic || msg.topic === selfTopic;
+                    console.log(`[Trystero Local] Publish msg: topic=${msg.topic}, isRelevant=${isRelevant}, hasData=${!!msg.data}, sender=${msg.sender || 'N/A'}`);
 
+                    if (isRelevant) {
                         if (msg.data) {
-                            // Trystero expects onMessage(topic, data, signalPeer)
-                            // signalPeer is a function (topic, data) => void used to reply/signal back
-
                             const signalPeer = (targetTopic: string, payload: any) => {
+                                console.log(`[Trystero Local] signalPeer() → topic=${targetTopic}`);
                                 if (ws.readyState === 1) {
                                     ws.send(JSON.stringify({
                                         type: 'publish',
@@ -213,14 +217,7 @@ export const joinRoom = strategy({
 
     // 3. Announce presence
     announce: (ws: WebSocket, rootTopic: string) => {
-        // Trystero sends its own announce packet, usually? 
-        // No, 'announce' is called by Trystero to say "I am here".
-        // We should just broadcast a presence message?
-        // Actually, Trystero usually handles the payload logic if we just provide the channel.
-        // But here 'announce' is part of the strategy interface. 
-        // The default strategy sends a 'multicast' packet?
-        // Let's just do a simple publish to rootTopic.
-
+        console.log(`[Trystero Local] announce() → rootTopic=${rootTopic}, selfId=${selfId}`);
         ws.send(JSON.stringify({
             type: 'publish',
             topic: rootTopic,
