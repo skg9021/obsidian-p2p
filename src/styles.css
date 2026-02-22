@@ -37,3 +37,8 @@ CSS for the Obsidian plugin.
     visibility: visible;
     pointer-events: auto;
 }
+
+/* Force local native cursor caret to be black when interacting inside Obsidian */
+.cm-content * {
+    caret-color: black !important;
+}
