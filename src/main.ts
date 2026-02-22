@@ -49,6 +49,23 @@ export default class P2PSyncPlugin extends Plugin {
             this.logger.trace('[P2P Sync] onPeersUpdated stack:', trace.stack);
             // END TRACING
             this.logger.log(`Awareness peers: [${peers.map(p => `${p.name}(${p.source})`).join(', ')}]`);
+
+            // Notify when new peers join
+            const oldNames = new Set(this.connectedClients.map(p => p.name));
+            for (const peer of peers) {
+                if (!oldNames.has(peer.name)) {
+                    new Notice(`🟢 ${peer.name} joined the room`);
+                }
+            }
+
+            // Notify when peers leave
+            const newNames = new Set(peers.map(p => p.name));
+            for (const oldPeer of this.connectedClients) {
+                if (!newNames.has(oldPeer.name)) {
+                    new Notice(`🔴 ${oldPeer.name} left the room`);
+                }
+            }
+
             this.connectedClients = peers;
             if (this.settingsTab) this.settingsTab.updatePeerList();
         };
