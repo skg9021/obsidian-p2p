@@ -8,6 +8,7 @@ import { LocalStrategy } from './services/strategies/local-strategy';
 import { LocalServerService } from './services/local-server.service';
 import { Logger } from './services/logger.service';
 import { FileTransferService } from './services/file-transfer.service';
+import { buildCursorExtension } from './cursor-extension';
 
 export default class P2PSyncPlugin extends Plugin {
     settings: P2PSettings;
@@ -82,6 +83,8 @@ export default class P2PSyncPlugin extends Plugin {
         // UI & Commands
         this.settingsTab = new P2PSyncSettingTab(this.app, this);
         this.addSettingTab(this.settingsTab);
+
+        this.registerEditorExtension(buildCursorExtension(this));
 
         this.statusBarItem = this.addStatusBarItem();
         this.statusBarItem.setText('🔴 P2P: Offline');
