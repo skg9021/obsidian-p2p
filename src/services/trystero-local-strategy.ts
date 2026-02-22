@@ -192,7 +192,19 @@ export const joinRoom = strategy({
                                 }
                             };
 
-                            onMessage(msg.topic, msg.data, signalPeer);
+                            console.log(`[Trystero Local] Calling onMessage (Trystero handleMessage) with data:`, JSON.stringify(msg.data));
+                            const hangTimer = setTimeout(() => {
+                                console.warn(`[Trystero Local] ⚠️ onMessage (handleMessage) has been running >10s — likely stuck on WebRTC offer generation (ICE gathering). Check RTCPeerConnection / STUN server access.`);
+                            }, 10000);
+
+                            // onMessage is async in Trystero (handleMessage returns a promise)
+                            Promise.resolve(onMessage(msg.topic, msg.data, signalPeer)).then(() => {
+                                clearTimeout(hangTimer);
+                                console.log(`[Trystero Local] onMessage completed`);
+                            }).catch((err) => {
+                                clearTimeout(hangTimer);
+                                console.error(`[Trystero Local] onMessage error:`, err);
+                            });
                         }
                     }
                 }
