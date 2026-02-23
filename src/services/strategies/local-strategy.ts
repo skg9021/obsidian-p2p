@@ -146,11 +146,6 @@ export class LocalStrategy implements ConnectionStrategy {
                     awareness: this.awareness,
                     filterBcConns: false,
                     disableBc: true,
-                    // On mobile, skip STUN servers entirely — LAN peers connect
-                    // via host candidates only. This prevents ICE gathering from
-                    // hanging when external STUN servers are unreachable.
-                    // Desktop keeps default ICE servers for reliable connectivity.
-                    ...(Platform.isMobile ? { rtcConfig: { iceServers: [] } } : {}),
                 }
             );
 
