@@ -30,6 +30,47 @@ export default class P2PSyncPlugin extends Plugin {
     saveSettingsDebounced = debounce(this.saveSettings.bind(this), 1000, true);
 
     async onload() {
+        // --- TEMPORARY WEBRTC DEBUGGING ---
+        const OrigPeerConnection = window.RTCPeerConnection;
+        window.RTCPeerConnection = function (...args: any[]) {
+            // @ts-ignore
+            const pc = new OrigPeerConnection(...args);
+            const id = Math.random().toString(36).substring(2, 6);
+
+            console.log(`[WebRTC-${id}] Created PC with config:`, args[0]);
+
+            pc.addEventListener('icecandidate', (e: any) => {
+                if (e.candidate) {
+                    console.log(`[WebRTC-${id}] Gathered LOCAL ICE Candidate:`, e.candidate.candidate);
+                } else {
+                    console.log(`[WebRTC-${id}] Finished gathering ICE candidates.`);
+                }
+            });
+
+            pc.addEventListener('iceconnectionstatechange', () => {
+                console.log(`[WebRTC-${id}] ICE Connection State:`, pc.iceConnectionState);
+            });
+
+            pc.addEventListener('connectionstatechange', () => {
+                console.log(`[WebRTC-${id}] Connection State:`, pc.connectionState);
+            });
+
+            const origAddIceCandidate = pc.addIceCandidate.bind(pc);
+            pc.addIceCandidate = async (candidate: any) => {
+                console.log(`[WebRTC-${id}] Adding REMOTE ICE Candidate:`, candidate?.candidate || candidate);
+                return origAddIceCandidate(candidate);
+            };
+
+            const origSetRemoteDescription = pc.setRemoteDescription.bind(pc);
+            pc.setRemoteDescription = async (desc: any) => {
+                console.log(`[WebRTC-${id}] Set Remote Description (${desc?.type})`);
+                return origSetRemoteDescription(desc);
+            };
+
+            return pc;
+        } as any;
+        // ----------------------------------
+
         await this.loadSettings();
 
         // Initialize Logger
