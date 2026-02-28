@@ -105,6 +105,9 @@ export class P2PSyncSettingTab extends PluginSettingTab {
                 .onChange(async (value) => {
                     this.plugin.settings.deviceName = value;
                     await this.plugin.saveSettingsDebounced();
+                    if (this.plugin.yjsService) {
+                        this.plugin.yjsService.awareness.setLocalStateField('name', value);
+                    }
                 }));
 
         new Setting(containerEl)
