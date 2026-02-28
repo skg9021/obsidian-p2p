@@ -180,9 +180,16 @@ export class MqttStrategy implements ConnectionStrategy {
         const savedState = this.awareness?.getLocalState();
 
         if (this.provider) {
+            try {
+                if (this.provider.trystero && typeof this.provider.trystero.leave === 'function') {
+                    this.provider.trystero.leave();
+                }
+                this.provider.destroy();
+            } catch (e) {
+                logger.error('[MqttStrategy] Error destroying provider', e);
+            }
             // @ts-ignore
             closeAllClients();
-            this.provider.destroy();
             this.provider = null;
             logger.info('[MqttStrategy] Disconnected');
         }
