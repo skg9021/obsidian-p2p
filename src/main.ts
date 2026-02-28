@@ -6,7 +6,7 @@ import { PeerInfo } from './services/p2p-types';
 import { MqttStrategy } from './services/strategies/mqtt-strategy';
 import { LocalStrategy } from './services/strategies/local-strategy';
 import { LocalServerService } from './services/local-server.service';
-import { Logger } from './services/logger.service';
+import { logger, updateLoggerSettings } from './services/logger.service';
 import { FileTransferService } from './services/file-transfer.service';
 import { buildCursorExtension } from './cursor-extension';
 
@@ -14,7 +14,6 @@ export default class P2PSyncPlugin extends Plugin {
     settings: P2PSettings;
     security: SecurityService;
     statusBarItem: HTMLElement;
-    logger: Logger;
 
     yjsService: YjsService;
     localServerService: LocalServerService;
@@ -33,22 +32,102 @@ export default class P2PSyncPlugin extends Plugin {
         await this.loadSettings();
 
         // Initialize Logger
-        this.logger = new Logger(this.settings);
-        this.logger.log('Plugin loading...');
+        updateLoggerSettings(this.settings);
+        logger.info('Plugin loading...');
+
+        // --- WEBRTC DEBUGGING (gated behind enableDebugLogs) ---
+        if (this.settings.enableDebugLogs) {
+            const wrapDataChannel = (dc: RTCDataChannel, pcId: string, label: string) => {
+                logger.trace(`[WebRTC-${pcId}] DataChannel "${label}" created, readyState=${dc.readyState}`);
+                dc.addEventListener('open', () => {
+                    logger.trace(`[WebRTC-${pcId}] DataChannel "${label}" OPENED`);
+                });
+                dc.addEventListener('close', () => {
+                    logger.trace(`[WebRTC-${pcId}] DataChannel "${label}" CLOSED`);
+                });
+                dc.addEventListener('error', (e: any) => {
+                    logger.trace(`[WebRTC-${pcId}] DataChannel "${label}" ERROR:`, e.error?.message || e);
+                });
+                dc.addEventListener('message', (e: any) => {
+                    const size = typeof e.data === 'string' ? e.data.length : e.data?.byteLength || 0;
+                    logger.trace(`[WebRTC-${pcId}] DataChannel "${label}" RECV ${size} bytes`);
+                });
+                const origSend = dc.send.bind(dc);
+                dc.send = (data: any) => {
+                    const size = typeof data === 'string' ? data.length : data?.byteLength || 0;
+                    logger.trace(`[WebRTC-${pcId}] DataChannel "${label}" SEND ${size} bytes`);
+                    return origSend(data);
+                };
+            };
+
+            const OrigPeerConnection = window.RTCPeerConnection;
+            window.RTCPeerConnection = function (...args: any[]) {
+                // @ts-ignore
+                const pc = new OrigPeerConnection(...args);
+                const id = Math.random().toString(36).substring(2, 6);
+
+                logger.trace(`[WebRTC-${id}] Created PC with config:`, args[0]);
+
+                // Intercept createDataChannel (initiator side)
+                const origCreateDC = pc.createDataChannel.bind(pc);
+                pc.createDataChannel = (label: string, ...dcArgs: any[]) => {
+                    const dc = origCreateDC(label, ...dcArgs);
+                    wrapDataChannel(dc, id, label);
+                    return dc;
+                };
+
+                // Intercept ondatachannel (receiver side)
+                pc.addEventListener('datachannel', (e: any) => {
+                    logger.trace(`[WebRTC-${id}] Remote DataChannel received: "${e.channel.label}"`);
+                    wrapDataChannel(e.channel, id, e.channel.label);
+                });
+
+                pc.addEventListener('icecandidate', (e: any) => {
+                    if (e.candidate) {
+                        logger.trace(`[WebRTC-${id}] Gathered LOCAL ICE Candidate:`, e.candidate.candidate);
+                    } else {
+                        logger.trace(`[WebRTC-${id}] Finished gathering ICE candidates.`);
+                    }
+                });
+
+                pc.addEventListener('iceconnectionstatechange', () => {
+                    logger.trace(`[WebRTC-${id}] ICE Connection State:`, pc.iceConnectionState);
+                });
+
+                pc.addEventListener('connectionstatechange', () => {
+                    logger.trace(`[WebRTC-${id}] Connection State:`, pc.connectionState);
+                });
+
+                const origAddIceCandidate = pc.addIceCandidate.bind(pc);
+                pc.addIceCandidate = async (candidate: any) => {
+                    logger.trace(`[WebRTC-${id}] Adding REMOTE ICE Candidate:`, candidate?.candidate || candidate);
+                    return origAddIceCandidate(candidate);
+                };
+
+                const origSetRemoteDescription = pc.setRemoteDescription.bind(pc);
+                pc.setRemoteDescription = async (desc: any) => {
+                    logger.trace(`[WebRTC-${id}] Set Remote Description (${desc?.type})`);
+                    return origSetRemoteDescription(desc);
+                };
+
+                return pc;
+            } as any;
+        } // end debug logging gate
+        // ----------------------------------
 
         // Initialize Security
         this.security = new SecurityService(this.settings.secretKey);
         await this.security.deriveKey(this.settings.secretKey);
-        this.logger.log('Security service initialized');
+        logger.info('Security service initialized');
 
         // Initialize Yjs Service (manages Y.Doc + both P2P providers + awareness)
         this.yjsService = new YjsService(this.app, this.settings);
         this.yjsService.onPeersUpdated = (peers) => {
             // START TRACING
             const trace = new Error('Peer Update Tracer');
-            this.logger.trace('[P2P Sync] onPeersUpdated stack:', trace.stack);
+            logger.trace('[P2P Sync] onPeersUpdated stack:', trace.stack);
             // END TRACING
-            this.logger.log(`Awareness peers: [${peers.map(p => `${p.name}(${p.source})`).join(', ')}]`);
+            logger.info(`Awareness peers: [${peers.map(p => `${p.name}(${p.source})`).join(', ')}]`);
 
             // Notify when new peers join
             const oldNames = new Set(this.connectedClients.map(p => p.name));
@@ -71,11 +150,11 @@ export default class P2PSyncPlugin extends Plugin {
         };
 
         // Register Strategies
-        const mqttStrategy = new MqttStrategy(this.logger);
+        const mqttStrategy = new MqttStrategy();
         mqttStrategy.initialize(this.yjsService.ydoc, this.yjsService.awareness);
         this.yjsService.providerManager.registerStrategy(mqttStrategy);
 
-        const localStrategy = new LocalStrategy(this.logger);
+        const localStrategy = new LocalStrategy();
         localStrategy.initialize(this.yjsService.ydoc, this.yjsService.awareness);
         this.yjsService.providerManager.registerStrategy(localStrategy);
 
@@ -84,18 +163,18 @@ export default class P2PSyncPlugin extends Plugin {
         this.localServerService.getLocalIPs().then(ips => {
             this.yjsService.setLocalIPs(ips);
         });
-        this.logger.log('Yjs service initialized');
+        logger.info('Yjs service initialized');
 
         this.localServerService.setCallbacks(
             (clients) => {
-                this.logger.log(`Signaling server connections: [${clients.join(', ')}]`);
+                logger.info(`Signaling server connections: [${clients.join(', ')}]`);
             },
         );
-        this.logger.log('Local signaling server service initialized');
+        logger.info('Local signaling server service initialized');
 
         // Initialize File Transfer Service
         this.fileTransferService = new FileTransferService(this.app, this.yjsService, this.settings);
-        this.logger.log('File Transfer service initialized');
+        logger.info('File Transfer service initialized');
 
         // UI & Commands
         this.settingsTab = new P2PSyncSettingTab(this.app, this);
@@ -123,13 +202,13 @@ export default class P2PSyncPlugin extends Plugin {
             name: 'Debug State',
             callback: () => {
                 this.fileTransferService.debugState();
-                console.log('--- Yjs State ---');
+                logger.info('--- Yjs State ---');
                 // @ts-ignore
-                console.log('Yjs ClientID:', this.yjsService.ydoc.clientID);
+                logger.info('Yjs ClientID:', this.yjsService.ydoc.clientID);
                 // @ts-ignore
-                console.log('Provider Strategies:', this.yjsService.providerManager.strategies);
-                console.log('Aggregated Peers:', this.yjsService.providerManager.getPeers());
-                console.log('Connected Clients:', this.connectedClients);
+                logger.info('Provider Strategies:', this.yjsService.providerManager.strategies);
+                logger.info('Aggregated Peers:', this.yjsService.providerManager.getPeers());
+                logger.info('Connected Clients:', this.connectedClients);
             }
         });
 
@@ -141,25 +220,25 @@ export default class P2PSyncPlugin extends Plugin {
 
         // Startup
         this.app.workspace.onLayoutReady(() => {
-            this.logger.log('Layout ready, starting sync and connection');
+            logger.info('Layout ready, starting sync and connection');
             this.fileTransferService.initialize();
             this.syncLocalToYjs();
             // this.connect();
         });
 
-        this.logger.log('Plugin loaded successfully');
+        logger.info('Plugin loaded successfully');
     }
 
     async onunload() {
-        this.logger.log('Plugin unloading...');
+        logger.info('Plugin unloading...');
         this.disconnect();
         this.yjsService.destroy();
-        this.logger.log('Plugin unloaded');
+        logger.info('Plugin unloaded');
     }
 
     async handleLocalModify(file: TAbstractFile) {
         if (!(file instanceof TFile)) return;
-        this.logger.log(`Local file modified: ${file.path}`);
+        logger.info(`Local file modified: ${file.path}`);
 
         if (file.extension === 'md') {
             this.yjsService.handleLocalModify(file);
@@ -170,7 +249,7 @@ export default class P2PSyncPlugin extends Plugin {
     }
 
     async syncLocalToYjs() {
-        this.logger.log('Syncing local vault to Yjs');
+        logger.info('Syncing local vault to Yjs');
         this.yjsService.syncLocalToYjs();
     }
 
@@ -179,24 +258,24 @@ export default class P2PSyncPlugin extends Plugin {
     async connect() {
         // TODO: Explore why MQTT is not here considering this is common connect
 
-        this.logger.log('--- connect() called ---');
+        logger.info('--- connect() called ---');
         this.disconnect();
 
         const roomName = await this.getRoomName();
 
         // ─── Start Local Server if needed ───
         if (!Platform.isMobile && this.settings.enableLocalServer) {
-            this.logger.log(`Starting local signaling server on port ${this.settings.localServerPort}...`);
+            logger.info(`Starting local signaling server on port ${this.settings.localServerPort}...`);
             try {
                 await this.localServerService.startServer();
-                this.logger.log(`Signaling server started`);
+                logger.info(`Signaling server started`);
             } catch (e) {
-                this.logger.error('Failed to start signaling server', e);
+                logger.error('Failed to start signaling server', e);
             }
         } else if (this.settings.enableLocalClient && this.settings.localServerAddress) { // ─── Client Reconnect Logic ───
             this.checkConnection(this.settings.localServerAddress).then((canConnect) => {
                 if (!canConnect) {
-                    this.logger.log(`Connection check to ${this.settings.localServerAddress} failed. Scheduling reconnect...`);
+                    logger.info(`Connection check to ${this.settings.localServerAddress} failed. Scheduling reconnect...`);
                     this.scheduleReconnect(roomName);
                 } else {
                     this.clientReconnectAttempts = 0;
@@ -207,14 +286,14 @@ export default class P2PSyncPlugin extends Plugin {
         await this.yjsService.providerManager.connectAll(roomName, this.settings);
         this.fileTransferService.setupProviderActions();
         this.yjsService.refreshPeerList();
-        this.logger.log('--- connect() complete ---');
+        logger.info('--- connect() complete ---');
     }
 
     scheduleReconnect(roomName: string) {
         if (this.clientReconnectTimeout) clearTimeout(this.clientReconnectTimeout);
 
         const delay = Math.min(1000 * Math.pow(2, this.clientReconnectAttempts), this.maxReconnectDelay);
-        this.logger.log(`Attempting reconnect in ${delay}ms (Attempt ${this.clientReconnectAttempts + 1})`);
+        logger.info(`Attempting reconnect in ${delay}ms (Attempt ${this.clientReconnectAttempts + 1})`);
 
         // Let ProviderManager handle the "Disconnected" UI state while we wait, 
         // or we could show a distinct UI for retrying. For now, just logging is fine.
@@ -242,10 +321,10 @@ export default class P2PSyncPlugin extends Plugin {
             clearTimeout(this.clientReconnectTimeout);
             this.clientReconnectTimeout = null;
         }
-        this.logger.log('--- disconnect() called ---');
+        logger.info('--- disconnect() called ---');
         this.yjsService.providerManager.disconnectAll();
         this.localServerService.stopServer();
-        this.logger.log('All services disconnected');
+        logger.info('All services disconnected');
     }
 
     async loadSettings() {
@@ -261,7 +340,7 @@ export default class P2PSyncPlugin extends Plugin {
 
     async handleLocalRename(file: TAbstractFile, oldPath: string) {
         if (!(file instanceof TFile)) return;
-        // this.logger.log(`Local file renamed: ${oldPath} -> ${file.path}`);
+        // logger.info(`Local file renamed: ${oldPath} -> ${file.path}`);
         if (file.extension !== 'md') {
             this.fileTransferService.handleLocalRename(file, oldPath);
         }
@@ -283,7 +362,7 @@ export default class P2PSyncPlugin extends Plugin {
     }
 
     async reloadMqttStrategy() {
-        this.logger.log('--- reloadMqttStrategy() called ---');
+        logger.info('--- reloadMqttStrategy() called ---');
         const roomName = await this.getRoomName();
         await this.yjsService.providerManager.connectStrategy('mqtt', roomName, this.settings);
         this.fileTransferService.setupProviderActions();
@@ -291,7 +370,7 @@ export default class P2PSyncPlugin extends Plugin {
     }
 
     async reloadLocalStrategy() {
-        this.logger.log('--- reloadLocalStrategy() called ---');
+        logger.info('--- reloadLocalStrategy() called ---');
 
         // Stop server if it's running
         this.localServerService.stopServer();
@@ -301,17 +380,17 @@ export default class P2PSyncPlugin extends Plugin {
 
         // Restart Server if enabled
         if (!Platform.isMobile && this.settings.enableLocalServer) {
-            this.logger.log(`Starting local signaling server on port ${this.settings.localServerPort}...`);
+            logger.info(`Starting local signaling server on port ${this.settings.localServerPort}...`);
             try {
                 await this.localServerService.startServer();
-                this.logger.log(`Signaling server started`);
+                logger.info(`Signaling server started`);
             } catch (e) {
-                this.logger.error('Failed to start signaling server', e);
+                logger.error('Failed to start signaling server', e);
             }
         } else if (this.settings.enableLocalClient && this.settings.localServerAddress) { // Client Reconnect Checks (UI feedback)
             this.checkConnection(this.settings.localServerAddress).then((canConnect) => {
                 if (!canConnect) {
-                    this.logger.log(`Connection check to ${this.settings.localServerAddress} failed. Scheduling reconnect...`);
+                    logger.info(`Connection check to ${this.settings.localServerAddress} failed. Scheduling reconnect...`);
                     this.scheduleReconnect(roomName);
                 } else {
                     this.clientReconnectAttempts = 0;

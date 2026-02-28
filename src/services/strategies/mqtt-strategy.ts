@@ -3,11 +3,10 @@ import * as Y from 'yjs';
 import * as awarenessProtocol from 'y-protocols/awareness';
 import { ConnectionStrategy, StrategyId } from './connection-strategy.interface';
 import { PeerInfo, ConnectionStatus } from '../p2p-types';
-// @ts-ignore
-import { TrysteroProvider } from '@winstonfassett/y-webrtc-trystero';
+import { YTrysteroProvider } from '../y-trystero';
 // @ts-ignore
 import { joinRoom, closeAllClients } from 'trystero/mqtt';
-import { Logger } from '../logger.service';
+import { logger } from '../logger.service';
 
 export class MqttStrategy implements ConnectionStrategy {
     id: StrategyId = 'mqtt';
@@ -16,7 +15,6 @@ export class MqttStrategy implements ConnectionStrategy {
     private doc: Y.Doc | null = null;
     private awareness: awarenessProtocol.Awareness | null = null;
     private provider: any | null = null;
-    private logger: Logger;
 
     // Track peers visible to THIS provider
     private myPeers: Map<number, any> = new Map();
@@ -27,8 +25,7 @@ export class MqttStrategy implements ConnectionStrategy {
     private statusCallback: (status: ConnectionStatus) => void = () => { };
     private currentStatus: ConnectionStatus = 'disconnected';
 
-    constructor(logger: Logger) {
-        this.logger = logger;
+    constructor() {
     }
 
     initialize(doc: Y.Doc, awareness: awarenessProtocol.Awareness): void {
@@ -50,7 +47,7 @@ export class MqttStrategy implements ConnectionStrategy {
         }
 
         if (!settings.enableMqttDiscovery) {
-            this.logger.log('[MqttStrategy] Disabled in settings. Skipping.');
+            logger.info('[MqttStrategy] Disabled in settings. Skipping.');
             return;
         }
 
@@ -61,7 +58,7 @@ export class MqttStrategy implements ConnectionStrategy {
         // CRITICAL: provider.destroy() wipes awareness state to null.
         // Restore it so the clock bump below actually works.
         if (this.awareness && !this.awareness.getLocalState()) {
-            this.logger.debug('[MqttStrategy] Restoring awareness state after disconnect wipe');
+            logger.debug('[MqttStrategy] Restoring awareness state after disconnect wipe');
             this.awareness.setLocalState({
                 name: settings.deviceName,
             });
@@ -78,30 +75,30 @@ export class MqttStrategy implements ConnectionStrategy {
 
         const fullRoomName = `mqtt-${roomName}`;
         const signalingUrl = relayUrls ? relayUrls.join(', ') : 'default'; // Determine signaling URL for logging
-        this.logger.log(`[MqttStrategy] Connecting to room: ${fullRoomName} via ${signalingUrl}`);
+        logger.info(`[MqttStrategy] Connecting to room: ${fullRoomName} via ${signalingUrl}`);
         this.emitStatus('connecting');
 
         try {
-            this.provider = new TrysteroProvider(
+            // Create the Trystero room FIRST, then inject it into the provider.
+            // This ensures makeAction() is called before any peers can join.
+            const trysteroRoom = joinRoom({
+                appId: 'obsidian-p2p-sync',
+                password: password || undefined,
+                ...(relayUrls && relayUrls.length > 0 ? { relayUrls } : {}),
+                ...(mqttCredentials?.username ? {
+                    mqttUsername: mqttCredentials.username,
+                    mqttPassword: mqttCredentials.password,
+                } : {}),
+            }, fullRoomName);
+
+            this.provider = new YTrysteroProvider(
                 fullRoomName,
                 this.doc,
                 {
+                    room: trysteroRoom,
                     awareness: this.awareness,
                     filterBcConns: false,
                     disableBc: true,
-                    joinRoom: (config: any, roomId: string) => {
-                        return joinRoom({
-                            ...config,
-                            appId: config.appId || 'obsidian-p2p-sync',
-                            password: password || undefined,
-                            ...(relayUrls && relayUrls.length > 0 ? { relayUrls } : {}),
-                            ...(mqttCredentials?.username ? {
-                                mqttUsername: mqttCredentials.username,
-                                mqttPassword: mqttCredentials.password,
-                            } : {}),
-                        }, roomId);
-                    },
-                    password: password || undefined,
                 }
             );
 
@@ -111,7 +108,7 @@ export class MqttStrategy implements ConnectionStrategy {
             this.provider.on('status', (event: any) => {
                 // When we connect, explicitly update our awareness state to force a broadcast
                 if (event && event.connected === true && this.awareness) {
-                    this.logger?.debug('[MqttStrategy] Connected, forcing awareness broadcast');
+                    logger.debug('[MqttStrategy] Connected, forcing awareness broadcast');
                     this.emitStatus('connected');
                     // Briefly set a connecting timestamp to force awareness protocol to broadcast changes
                     this.awareness.setLocalStateField('__reconnectedAt', Date.now());
@@ -119,35 +116,28 @@ export class MqttStrategy implements ConnectionStrategy {
             });
 
             this.provider.on('synced', (event: any) => {
-                // console.log(`[MqttStrategy] Synced:`, event);
+                // logger.info(`[MqttStrategy] Synced:`, event);
             });
 
             this.provider.on('peers', (event: any) => {
-                // If we get any peer events, we are definitely connected to the signaling server
+                // If we get any peer events, we are definitely connected
                 this.emitStatus('connected');
 
                 if (!this.provider?.room) return;
                 const remaining = this.provider.room.trysteroConns?.size || 0;
-                this.logger.debug(`[MqttStrategy] peers event: remaining WebRTC conns=${remaining}, tracked peers=${this.myPeers.size}`);
+                logger.debug(`[MqttStrategy] peers event: remaining WebRTC conns=${remaining}, tracked peers=${this.myPeers.size}`);
                 if (remaining === 0 && this.myPeers.size > 0) {
                     setTimeout(() => {
                         if (!this.provider?.room) return;
                         const stillEmpty = (this.provider.room.trysteroConns?.size || 0) === 0;
                         if (stillEmpty && this.myPeers.size > 0) {
-                            this.logger.debug('[MqttStrategy] All WebRTC connections confirmed closed, clearing peers');
+                            logger.debug('[MqttStrategy] All WebRTC connections confirmed closed, clearing peers');
                             this.myPeers.clear();
                             this.notifyPeersChanged();
                         }
                     }, 5000);
                 }
             });
-
-            // Fallback: Trystero's native connection events
-            if (this.provider.trystero) {
-                this.provider.trystero.onPeerJoin(() => {
-                    this.emitStatus('connected');
-                });
-            }
 
             // Periodic fallback: only ADDS peers, never removes.
             this.recomputeInterval = setInterval(() => {
@@ -164,7 +154,7 @@ export class MqttStrategy implements ConnectionStrategy {
                     this.awareness!.getStates().forEach((state, clientId) => {
                         if (clientId === this.awareness!.clientID) return;
                         if (!this.myPeers.has(clientId) && state.name) {
-                            this.logger.debug(`[MqttStrategy] Fallback scan: adding peer ${state.name} (clientId=${clientId})`);
+                            logger.debug(`[MqttStrategy] Fallback scan: adding peer ${state.name} (clientId=${clientId})`);
                             this.myPeers.set(clientId, state);
                             changed = true;
                         }
@@ -174,7 +164,7 @@ export class MqttStrategy implements ConnectionStrategy {
             }, 2000);
 
         } catch (e) {
-            this.logger.error('[MqttStrategy] Failed to start TrysteroProvider', e);
+            logger.error('[MqttStrategy] Failed to start TrysteroProvider', e);
             this.emitStatus('error');
             throw e;
         }
@@ -190,11 +180,18 @@ export class MqttStrategy implements ConnectionStrategy {
         const savedState = this.awareness?.getLocalState();
 
         if (this.provider) {
+            try {
+                if (this.provider.trystero && typeof this.provider.trystero.leave === 'function') {
+                    this.provider.trystero.leave();
+                }
+                this.provider.destroy();
+            } catch (e) {
+                logger.error('[MqttStrategy] Error destroying provider', e);
+            }
             // @ts-ignore
             closeAllClients();
-            this.provider.destroy();
             this.provider = null;
-            this.logger.log('[MqttStrategy] Disconnected');
+            logger.info('[MqttStrategy] Disconnected');
         }
 
         // Restore awareness state (provider.destroy wipes it to null)
@@ -264,7 +261,7 @@ export class MqttStrategy implements ConnectionStrategy {
                 if (state) {
                     const prev = this.myPeers.get(clientId);
                     if (!prev || JSON.stringify(prev) !== JSON.stringify(state)) {
-                        this.logger.debug(`[MqttStrategy] Peer ${state.name || clientId} tracked via origin (clientId=${clientId})`);
+                        logger.debug(`[MqttStrategy] Peer ${state.name || clientId} tracked via origin (clientId=${clientId})`);
                         this.myPeers.set(clientId, state);
                         changed = true;
                     }
@@ -275,7 +272,7 @@ export class MqttStrategy implements ConnectionStrategy {
         // Handle removals regardless of origin (peer is globally gone)
         for (const clientId of removed) {
             if (this.myPeers.has(clientId)) {
-                this.logger.debug(`[MqttStrategy] Peer removed (clientId=${clientId})`);
+                logger.debug(`[MqttStrategy] Peer removed (clientId=${clientId})`);
                 this.myPeers.delete(clientId);
                 changed = true;
             }

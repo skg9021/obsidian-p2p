@@ -1,5 +1,6 @@
 import * as mqtt from 'mqtt';
 import { P2PSettings } from '../settings';
+import { logger } from './logger.service';
 
 export class MqttService {
     private client: mqtt.MqttClient | null = null;
@@ -17,7 +18,7 @@ export class MqttService {
     }
 
     private log(msg: string, ...args: any[]) {
-        if (this.settings.enableDebugLogs) console.log(`[P2P MQTT] ${msg}`, ...args);
+        if (this.settings.enableDebugLogs) logger.debug(`[P2P MQTT] ${msg}`, ...args);
     }
 
     async connect() {
@@ -60,7 +61,7 @@ export class MqttService {
 
         this.client.on('error', (err) => {
             this.log('MQTT Error:', err.message);
-            console.error('[P2P MQTT] Error:', err);
+            logger.error('[P2P MQTT] Error:', err);
         });
 
         this.client.on('reconnect', () => {

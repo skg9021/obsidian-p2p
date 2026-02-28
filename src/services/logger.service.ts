@@ -1,47 +1,72 @@
 import { P2PSettings } from '../settings';
 
-export class Logger {
-    constructor(private settings: P2PSettings) { }
+// Flag to toggle between Local Time and UTC for log timestamps
+const useLocalTimestamp = true;
 
-    private shouldLog(level: 'info' | 'debug' | 'trace'): boolean {
-        if (!this.settings.enableDebugLogs) return false;
+// Pino-compatible log level numeric values
+const LEVELS: Record<string, number> = {
+    fatal: 60,
+    error: 50,
+    warn: 40,
+    info: 30,
+    debug: 20,
+    trace: 10,
+};
 
-        const levels = { 'info': 1, 'debug': 2, 'trace': 3 };
-        const currentLevel = levels[this.settings.debugLevel || 'info'];
-        const messageLevel = levels[level];
+// Human-readable level labels
+const LEVEL_LABELS: Record<string, string> = {
+    fatal: 'FATAL',
+    error: 'ERROR',
+    warn: 'WARN',
+    info: 'INFO',
+    debug: 'DEBUG',
+    trace: 'TRACE',
+};
 
-        return currentLevel >= messageLevel;
-    }
+function formatTimestamp(): string {
+    const date = new Date();
+    return useLocalTimestamp ? date.toLocaleString() : date.toISOString();
+}
 
-    log(message: string, ...args: any[]) {
-        this.info(message, ...args);
-    }
+function createLogMethod(levelName: string, consoleMethod: 'log' | 'warn' | 'error') {
+    const levelValue = LEVELS[levelName];
+    const levelLabel = LEVEL_LABELS[levelName];
 
-    info(message: string, ...args: any[]) {
-        if (this.shouldLog('info')) {
-            console.log(`[INFO] ${message}`, ...args);
-        }
-    }
+    return function (msg: any, ...args: any[]) {
+        if (levelValue < LEVELS[logger.level]) return;
+        const prefix = `[${formatTimestamp()}] [${levelLabel}]`;
+        console[consoleMethod](`${prefix} ${msg}`, ...args);
+    };
+}
 
-    debug(message: string, ...args: any[]) {
-        if (this.shouldLog('debug')) {
-            console.log(`[DEBUG] ${message}`, ...args);
-        }
-    }
+export interface ILogger {
+    info(msg: any, ...args: any[]): void;
+    warn(msg: any, ...args: any[]): void;
+    error(msg: any, ...args: any[]): void;
+    debug(msg: any, ...args: any[]): void;
+    trace(msg: any, ...args: any[]): void;
+    fatal(msg: any, ...args: any[]): void;
+    level: string;
+}
 
-    trace(message: string, ...args: any[]) {
-        if (this.shouldLog('trace')) {
-            console.log(`[TRACE] ${message}`, ...args);
-        }
-    }
+// Create a singleton logger instance with console.log-style API
+export const logger: ILogger = {
+    level: 'info',
+    info: createLogMethod('info', 'log'),
+    warn: createLogMethod('warn', 'warn'),
+    error: createLogMethod('error', 'error'),
+    debug: createLogMethod('debug', 'log'),
+    trace: createLogMethod('trace', 'log'),
+    fatal: createLogMethod('fatal', 'error'),
+};
 
-    warn(message: string, ...args: any[]) {
-        if (this.settings.enableDebugLogs) {
-            console.warn(`[WARN] ${message}`, ...args);
-        }
-    }
-
-    error(message: string, ...args: any[]) {
-        console.error(`[ERROR] ${message}`, ...args);
+/**
+ * Configure the global logger instance based on user settings
+ */
+export function updateLoggerSettings(settings: P2PSettings) {
+    if (!settings.enableDebugLogs) {
+        logger.level = 'warn';
+    } else {
+        logger.level = settings.debugLevel || 'info';
     }
 }

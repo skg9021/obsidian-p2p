@@ -5,10 +5,9 @@ import { ConnectionStrategy, StrategyId } from './connection-strategy.interface'
 import { Platform } from 'obsidian';
 import { PeerInfo, ConnectionStatus } from '../p2p-types';
 import { P2PSettings } from '../../settings'; // Needed for local strategy joinRoom config
-// @ts-ignore
-import { TrysteroProvider } from '@winstonfassett/y-webrtc-trystero';
+import { YTrysteroProvider } from '../y-trystero';
 import { joinRoom as joinLocalRoom } from '../trystero-local-strategy';
-import { Logger } from '../logger.service';
+import { logger } from '../logger.service';
 
 export class LocalStrategy implements ConnectionStrategy {
     id: StrategyId = 'local';
@@ -17,7 +16,6 @@ export class LocalStrategy implements ConnectionStrategy {
     private doc: Y.Doc | null = null;
     private awareness: awarenessProtocol.Awareness | null = null;
     private provider: any | null = null;
-    private logger: Logger;
 
     // Track peers visible to THIS provider
     private myPeers: Map<number, any> = new Map();
@@ -28,8 +26,7 @@ export class LocalStrategy implements ConnectionStrategy {
     private statusCallback: (status: ConnectionStatus) => void = () => { };
     private currentStatus: ConnectionStatus = 'disconnected';
 
-    constructor(logger: Logger) {
-        this.logger = logger;
+    constructor() {
     }
 
     initialize(doc: Y.Doc, awareness: awarenessProtocol.Awareness): void {
@@ -40,7 +37,7 @@ export class LocalStrategy implements ConnectionStrategy {
                 this.handleAwarenessUpdate([...added, ...(updated || [])], removed, origin);
             });
         }
-        this.logger.log('[LocalStrategy] Initialized with awareness: ', this.awareness);
+        logger.info('[LocalStrategy] Initialized with awareness: ', this.awareness);
     }
 
     async connect(roomName: string, settings: any): Promise<void> {
@@ -98,16 +95,16 @@ export class LocalStrategy implements ConnectionStrategy {
         }
 
         if (!shouldConnect) {
-            // console.log('[LocalStrategy] Disabled or invalid settings. Skipping.');
+            // logger.info('[LocalStrategy] Disabled or invalid settings. Skipping.');
             return;
         }
 
         if (!signalingUrl) {
-            console.error('[LocalStrategy] Missing signalingUrl in connect options');
+            logger.error('[LocalStrategy] Missing signalingUrl in connect options');
             return;
         }
 
-        // console.log(`[LocalStrategy] Connecting to ${signalingUrl}...`);
+        // logger.info(`[LocalStrategy] Connecting to ${signalingUrl}...`);
 
         const password = settings.secretKey;
         if (!this.doc || !this.awareness) {
@@ -119,30 +116,30 @@ export class LocalStrategy implements ConnectionStrategy {
         // Restore it so the clock bump below actually works and
         // TrysteroConn can broadcast a valid state to the remote peer.
         if (this.awareness && !this.awareness.getLocalState()) {
-            this.logger.debug('[LocalStrategy] Restoring awareness state after disconnect wipe');
+            logger.debug('[LocalStrategy] Restoring awareness state after disconnect wipe');
             this.awareness.setLocalState({
                 name: settings.deviceName,
             });
         }
 
         const fullRoomName = `lan-${roomName}`;
-        console.log(`[LocalStrategy] Connecting to room: ${fullRoomName} via ${signalingUrl}`);
+        logger.info(`[LocalStrategy] Connecting to room: ${fullRoomName} via ${signalingUrl}`);
         this.emitStatus('connecting');
 
         try {
-            this.provider = new TrysteroProvider(
+            // Create the Trystero room FIRST, then inject it into the provider.
+            const trysteroRoom = joinLocalRoom({
+                appId: 'obsidian-p2p-local',
+                password: password || undefined,
+                clientUrl: signalingUrl,
+                settings: settings,
+            }, fullRoomName);
+
+            this.provider = new YTrysteroProvider(
                 fullRoomName,
                 this.doc,
                 {
-                    appId: 'obsidian-p2p-local',
-                    password: password || undefined,
-                    joinRoom: (config: any, roomId: string) => {
-                        return joinLocalRoom({
-                            ...config,
-                            clientUrl: signalingUrl,
-                            settings: settings
-                        }, roomId);
-                    },
+                    room: trysteroRoom,
                     awareness: this.awareness,
                     filterBcConns: false,
                     disableBc: true,
@@ -156,7 +153,7 @@ export class LocalStrategy implements ConnectionStrategy {
             this.provider.on('status', (event: any) => {
                 // When we connect, explicitly update our awareness state to force a broadcast
                 if (event && event.connected === true && this.awareness) {
-                    this.logger?.debug('[LocalStrategy] Connected, forcing awareness broadcast');
+                    logger.debug('[LocalStrategy] Connected, forcing awareness broadcast');
                     this.emitStatus('connected');
 
                     // Briefly set a connecting timestamp to force awareness protocol to broadcast changesField('__reconnectedAt', Date.now());
@@ -170,27 +167,20 @@ export class LocalStrategy implements ConnectionStrategy {
                 // Grace period: Wait 5 seconds before clearing local peers if WebRTC connections drop
                 if (!this.provider?.room) return;
                 const remainingRaw = this.provider.room.trysteroConns?.size || 0;
-                this.logger.debug(`[LocalStrategy] peers event: remaining WebRTC conns=${remainingRaw}, tracked peers=${this.myPeers.size}`);
+                logger.debug(`[LocalStrategy] peers event: remaining WebRTC conns=${remainingRaw}, tracked peers=${this.myPeers.size}`);
 
                 if (remainingRaw === 0 && this.myPeers.size > 0) {
                     setTimeout(() => {
                         if (!this.provider?.room) return;
                         const stillEmpty = (this.provider.room.trysteroConns?.size || 0) === 0;
                         if (stillEmpty && this.myPeers.size > 0) {
-                            this.logger.debug('[LocalStrategy] All WebRTC connections confirmed closed, clearing peers');
+                            logger.debug('[LocalStrategy] All WebRTC connections confirmed closed, clearing peers');
                             this.myPeers.clear();
                             this.notifyPeersChanged();
                         }
                     }, 5000);
                 }
             });
-
-            // Fallback: Trystero's native connection events
-            if (this.provider.trystero) {
-                this.provider.trystero.onPeerJoin(() => {
-                    this.emitStatus('connected');
-                });
-            }
 
             // Periodic fallback: if trysteroConns has active entries but myPeers is empty,
             // origin-based tracking missed the event — scan all awareness states.
@@ -211,7 +201,7 @@ export class LocalStrategy implements ConnectionStrategy {
                     this.awareness!.getStates().forEach((state, clientId) => {
                         if (clientId === this.awareness!.clientID) return;
                         if (!this.myPeers.has(clientId) && state.name) {
-                            this.logger.debug(`[LocalStrategy] Fallback scan: adding peer ${state.name} (clientId=${clientId})`);
+                            logger.debug(`[LocalStrategy] Fallback scan: adding peer ${state.name} (clientId=${clientId})`);
                             this.myPeers.set(clientId, state);
                             changed = true;
                         }
@@ -224,7 +214,7 @@ export class LocalStrategy implements ConnectionStrategy {
             // TrysteroProvider generally emits events when connected.
 
         } catch (e) {
-            console.error('[LocalStrategy] Failed to start TrysteroProvider', e);
+            logger.error('[LocalStrategy] Failed to start TrysteroProvider', e);
             this.emitStatus('error');
             throw e;
         }
@@ -246,10 +236,10 @@ export class LocalStrategy implements ConnectionStrategy {
                 }
                 this.provider.destroy();
             } catch (e) {
-                console.error('[LocalStrategy] Error destroying provider', e);
+                logger.error('[LocalStrategy] Error destroying provider', e);
             }
             this.provider = null;
-            this.logger.log('[LocalStrategy] Disconnected');
+            logger.info('[LocalStrategy] Disconnected');
         }
 
         // Restore awareness state (provider.destroy wipes it to null)
@@ -319,7 +309,7 @@ export class LocalStrategy implements ConnectionStrategy {
                 if (state) {
                     const prev = this.myPeers.get(clientId);
                     if (!prev || JSON.stringify(prev) !== JSON.stringify(state)) {
-                        this.logger.debug(`[LocalStrategy] Peer ${state.name || clientId} tracked via origin (clientId=${clientId})`);
+                        logger.debug(`[LocalStrategy] Peer ${state.name || clientId} tracked via origin (clientId=${clientId})`);
                         this.myPeers.set(clientId, state);
                         changed = true;
                     }
@@ -330,7 +320,7 @@ export class LocalStrategy implements ConnectionStrategy {
         // Handle removals regardless of origin (peer is globally gone)
         for (const clientId of removed) {
             if (this.myPeers.has(clientId)) {
-                this.logger.debug(`[LocalStrategy] Peer removed (clientId=${clientId})`);
+                logger.debug(`[LocalStrategy] Peer removed (clientId=${clientId})`);
                 this.myPeers.delete(clientId);
                 changed = true;
             }

@@ -1,4 +1,5 @@
 import { App, TFile, Notice } from 'obsidian';
+import { logger } from './logger.service';
 import * as Y from 'yjs';
 import { YjsService } from './yjs.service';
 import { P2PSettings } from '../settings';
@@ -114,39 +115,39 @@ export class FileTransferService {
                             // Verification?
                         });
 
-                        console.log(`[FileTransfer] Setup actions for ${name} provider`);
+                        logger.info(`[FileTransfer] Setup actions for ${name} provider`);
                     } catch (e) {
-                        console.error(`[FileTransfer] Failed to setup actions for ${name}`, e);
+                        logger.error(`[FileTransfer] Failed to setup actions for ${name}`, e);
                     }
                 } else {
-                    // console.log(`[FileTransfer] Actions already setup for ${name}`);
+                    // logger.info(`[FileTransfer] Actions already setup for ${name}`);
                 }
             } else {
                 // Provider is gone, cleanup actions
                 if (this.transferAction[name]) {
                     delete this.transferAction[name];
-                    console.log(`[FileTransfer] Cleaned up actions for ${name} provider`);
+                    logger.info(`[FileTransfer] Cleaned up actions for ${name} provider`);
                 }
             }
         });
     }
 
     async handleFileRequest(hash: string, peerId: string, providerName: string) {
-        console.log(`[FileTransfer] Received request for hash ${hash} from ${peerId} via ${providerName}`);
+        logger.info(`[FileTransfer] Received request for hash ${hash} from ${peerId} via ${providerName}`);
 
         // 1. Find file metadata
         const metadata = this.fileRegistry.get(hash);
         if (!metadata) {
-            console.log(`[FileTransfer] File not found in registry: ${hash}`);
+            logger.info(`[FileTransfer] File not found in registry: ${hash}`);
             return;
         }
 
-        console.log(`[FileTransfer] Request for ${metadata.name} (path: ${metadata.path})`);
+        logger.info(`[FileTransfer] Request for ${metadata.name} (path: ${metadata.path})`);
 
         // 2. Check if we have the file
         const file = this.app.vault.getAbstractFileByPath(metadata.path);
         if (!file) {
-            console.log(`[FileTransfer] File not found locally at path: ${metadata.path}`);
+            logger.info(`[FileTransfer] File not found locally at path: ${metadata.path}`);
             return;
         }
 
@@ -164,21 +165,21 @@ export class FileTransferService {
                     // So we just send the whole buffer!
 
                     // Sending metadata with the chunk helps identify which file it is.
-                    console.log(`[FileTransfer] Sent ${metadata.name} to ${peerId} via ${providerName}`);
+                    logger.info(`[FileTransfer] Sent ${metadata.name} to ${peerId} via ${providerName}`);
                 } else {
-                    console.log(`[FileTransfer] No actions available for provider ${providerName}`);
+                    logger.info(`[FileTransfer] No actions available for provider ${providerName}`);
                 }
             } catch (e) {
-                console.error(`[FileTransfer] Failed to read ${metadata.path}`, e);
+                logger.error(`[FileTransfer] Failed to read ${metadata.path}`, e);
             }
         } else {
-            console.log(`[FileTransfer] Path is not a TFile: ${metadata.path}`);
+            logger.info(`[FileTransfer] Path is not a TFile: ${metadata.path}`);
         }
     }
 
     async handleFileChunk(data: Uint8Array, peerId: string, metadata: any) {
         if (!metadata || !metadata.hash) return;
-        console.log(`[FileTransfer] Received ${metadata.hash} size=${data.byteLength}`);
+        logger.info(`[FileTransfer] Received ${metadata.hash} size=${data.byteLength}`);
 
         // Trystero reassembles chunks for us. 'data' is the full file!
         // We just need to save it.
@@ -197,7 +198,7 @@ export class FileTransferService {
             // Remove from pending
             this.pendingDownloads.delete(meta.hash);
         } catch (e) {
-            console.error(`[FileTransfer] Failed to write ${meta.path}`, e);
+            logger.error(`[FileTransfer] Failed to write ${meta.path}`, e);
             this.pendingDownloads.delete(meta.hash);
         }
     }
@@ -210,14 +211,14 @@ export class FileTransferService {
         // If we are already an owner, we should have it (maybe deleted locally?)
         if (metadata.owners.includes(this.yjs.ydoc.clientID)) return;
 
-        console.log(`[FileTransfer] Missing file: ${metadata.name} (${metadata.hash}). Looking for owners...`);
+        logger.info(`[FileTransfer] Missing file: ${metadata.name} (${metadata.hash}). Looking for owners...`);
 
         // Find an available owner
         for (const ownerId of metadata.owners) {
             // Check if we are connected to this owner
             const providerName = this.yjs.getClientProvider(ownerId);
 
-            console.log(`[FileTransfer] Checking owner ${ownerId}. Provider: ${providerName}`);
+            logger.info(`[FileTransfer] Checking owner ${ownerId}. Provider: ${providerName}`);
             if (!providerName) {
                 // Debug why provider is null
                 // We can't access private sets from here directly unless we cast to any or add public debug method
@@ -228,7 +229,7 @@ export class FileTransferService {
             }
 
             if (providerName && this.transferAction[providerName]) {
-                console.log(`[FileTransfer] Requesting ${metadata.name} from client ${ownerId} via ${providerName}`);
+                logger.info(`[FileTransfer] Requesting ${metadata.name} from client ${ownerId} via ${providerName}`);
 
                 this.pendingDownloads.add(metadata.hash);
 
@@ -240,7 +241,7 @@ export class FileTransferService {
         }
 
 
-        console.log(`[FileTransfer] No available owners found for ${metadata.name}`);
+        logger.info(`[FileTransfer] No available owners found for ${metadata.name}`);
     }
 
     /**
@@ -286,9 +287,9 @@ export class FileTransferService {
                 this.fileRegistry.set(hash, metadata);
             }
 
-            console.log(`[FileTransfer] Registered local file: ${file.path} (${hash})`);
+            logger.info(`[FileTransfer] Registered local file: ${file.path} (${hash})`);
         } catch (e) {
-            console.error(`[FileTransfer] Failed to process local file ${file.path}`, e);
+            logger.error(`[FileTransfer] Failed to process local file ${file.path}`, e);
         }
     }
 
@@ -324,10 +325,10 @@ export class FileTransferService {
                         // this.fileRegistry.delete(hash);
                         // Keeping it might be useful for history? No, it wastes space.
                         this.fileRegistry.delete(hash);
-                        console.log(`[FileTransfer] Removed file from registry: ${file.path} (${hash})`);
+                        logger.info(`[FileTransfer] Removed file from registry: ${file.path} (${hash})`);
                     } else {
                         this.fileRegistry.set(hash, metadata);
-                        console.log(`[FileTransfer] Removed self as owner for: ${file.path} (${hash})`);
+                        logger.info(`[FileTransfer] Removed self as owner for: ${file.path} (${hash})`);
                     }
                 }
             }
@@ -336,14 +337,14 @@ export class FileTransferService {
     }
 
     debugState() {
-        console.log('--- FileTransferService State ---');
-        console.log('Transfer Actions:', Object.keys(this.transferAction));
-        console.log('Pending Downloads:', Array.from(this.pendingDownloads));
+        logger.info('--- FileTransferService State ---');
+        logger.info('Transfer Actions:', Object.keys(this.transferAction));
+        logger.info('Pending Downloads:', Array.from(this.pendingDownloads));
         //@ts-ignore
-        console.log('Registry Size:', this.fileRegistry.size);
+        logger.info('Registry Size:', this.fileRegistry.size);
         //@ts-ignore
-        console.log('Registry Keys:', Array.from(this.fileRegistry.keys()));
-        // console.log('Registry Entries:', this.fileRegistry.toJSON()); // Careful with large registry
+        logger.info('Registry Keys:', Array.from(this.fileRegistry.keys()));
+        // logger.info('Registry Entries:', this.fileRegistry.toJSON()); // Careful with large registry
     }
 
     private async computeHash(buffer: ArrayBuffer): Promise<string> {
