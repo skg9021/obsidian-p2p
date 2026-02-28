@@ -15,11 +15,24 @@ export interface ILogger {
 export const logger = pino({
     level: 'info',
     browser: {
-        serialize: true,
+        asObject: true,
         write: (o: any) => {
             const time = new Date(o.time).toISOString();
             const consoleMethod = o.level >= 50 ? 'error' : o.level >= 40 ? 'warn' : 'log';
-            console[consoleMethod](`[${time}] ${o.msg}`, ...o.args);
+            const { msg = '', ...rest } = o;
+
+            // Delete standard pino keys so they don't clog up the console printout
+            delete rest.level;
+            delete rest.time;
+            delete rest.v;
+            delete rest.pid;
+            delete rest.hostname;
+
+            if (Object.keys(rest).length > 0) {
+                console[consoleMethod](`[${time}] ${msg}`, rest);
+            } else {
+                console[consoleMethod](`[${time}] ${msg}`);
+            }
         }
     }
 }) as unknown as ILogger;
