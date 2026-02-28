@@ -1,5 +1,43 @@
-import pino from 'pino';
 import { P2PSettings } from '../settings';
+
+// Flag to toggle between Local Time and UTC for log timestamps
+const useLocalTimestamp = true;
+
+// Pino-compatible log level numeric values
+const LEVELS: Record<string, number> = {
+    fatal: 60,
+    error: 50,
+    warn: 40,
+    info: 30,
+    debug: 20,
+    trace: 10,
+};
+
+// Human-readable level labels
+const LEVEL_LABELS: Record<string, string> = {
+    fatal: 'FATAL',
+    error: 'ERROR',
+    warn: 'WARN',
+    info: 'INFO',
+    debug: 'DEBUG',
+    trace: 'TRACE',
+};
+
+function formatTimestamp(): string {
+    const date = new Date();
+    return useLocalTimestamp ? date.toLocaleString() : date.toISOString();
+}
+
+function createLogMethod(levelName: string, consoleMethod: 'log' | 'warn' | 'error') {
+    const levelValue = LEVELS[levelName];
+    const levelLabel = LEVEL_LABELS[levelName];
+
+    return function (msg: any, ...args: any[]) {
+        if (levelValue < LEVELS[logger.level]) return;
+        const prefix = `[${formatTimestamp()}] [${levelLabel}]`;
+        console[consoleMethod](`${prefix} ${msg}`, ...args);
+    };
+}
 
 export interface ILogger {
     info(msg: any, ...args: any[]): void;
@@ -11,56 +49,16 @@ export interface ILogger {
     level: string;
 }
 
-// Flag to toggle between Local Time and UTC for log timestamps
-const useLocalTimestamp = true;
-
-// Helper to convert Pino numeric levels to human-readable strings
-const getLevelString = (level: number): string => {
-    if (level >= 60) return 'FATAL';
-    if (level >= 50) return 'ERROR';
-    if (level >= 40) return 'WARN';
-    if (level >= 30) return 'INFO';
-    if (level >= 20) return 'DEBUG';
-    if (level >= 10) return 'TRACE';
-    return 'USER';
-};
-
-// Create a singleton pino logger instance
-export const logger = pino({
+// Create a singleton logger instance with console.log-style API
+export const logger: ILogger = {
     level: 'info',
-    browser: {
-        asObject: true,
-        write: (o: any) => {
-            const date = new Date(o.time);
-            const timeStr = useLocalTimestamp
-                ? date.toLocaleString()
-                : date.toISOString();
-
-            const levelStr = getLevelString(o.level);
-            const consoleMethod = o.level >= 50 ? 'error' : o.level >= 40 ? 'warn' : 'log';
-            const { msg = '', ...rest } = o;
-
-            // Delete standard pino keys so they don't clog up the console printout
-            delete rest.level;
-            delete rest.time;
-            delete rest.v;
-            delete rest.pid;
-            delete rest.hostname;
-
-            // Anything left over in `rest` is an argument passed to the logger.
-            // When asObject is true, Pino places extra arguments into an array under the key "msg" (if msg is missing)
-            // or just flat keys. To be totally safe and ensure everything is printed natively,
-            // we will spread out ALL remaining values.
-            const extraArgs = Object.values(rest);
-
-            if (extraArgs.length > 0) {
-                console[consoleMethod](`[${timeStr}] [${levelStr}] ${msg}`, ...extraArgs);
-            } else {
-                console[consoleMethod](`[${timeStr}] [${levelStr}] ${msg}`);
-            }
-        }
-    }
-}) as unknown as ILogger;
+    info: createLogMethod('info', 'log'),
+    warn: createLogMethod('warn', 'warn'),
+    error: createLogMethod('error', 'error'),
+    debug: createLogMethod('debug', 'log'),
+    trace: createLogMethod('trace', 'log'),
+    fatal: createLogMethod('fatal', 'error'),
+};
 
 /**
  * Configure the global logger instance based on user settings
