@@ -36,33 +36,33 @@ export default class P2PSyncPlugin extends Plugin {
             const pc = new OrigPeerConnection(...args);
             const id = Math.random().toString(36).substring(2, 6);
 
-            logger.info(`[WebRTC-${id}] Created PC with config:`, args[0]);
+            logger.trace(`[WebRTC-${id}] Created PC with config:`, args[0]);
 
             pc.addEventListener('icecandidate', (e: any) => {
                 if (e.candidate) {
-                    logger.info(`[WebRTC-${id}] Gathered LOCAL ICE Candidate:`, e.candidate.candidate);
+                    logger.trace(`[WebRTC-${id}] Gathered LOCAL ICE Candidate:`, e.candidate.candidate);
                 } else {
-                    logger.info(`[WebRTC-${id}] Finished gathering ICE candidates.`);
+                    logger.trace(`[WebRTC-${id}] Finished gathering ICE candidates.`);
                 }
             });
 
             pc.addEventListener('iceconnectionstatechange', () => {
-                logger.info(`[WebRTC-${id}] ICE Connection State:`, pc.iceConnectionState);
+                logger.trace(`[WebRTC-${id}] ICE Connection State:`, pc.iceConnectionState);
             });
 
             pc.addEventListener('connectionstatechange', () => {
-                logger.info(`[WebRTC-${id}] Connection State:`, pc.connectionState);
+                logger.trace(`[WebRTC-${id}] Connection State:`, pc.connectionState);
             });
 
             const origAddIceCandidate = pc.addIceCandidate.bind(pc);
             pc.addIceCandidate = async (candidate: any) => {
-                logger.info(`[WebRTC-${id}] Adding REMOTE ICE Candidate:`, candidate?.candidate || candidate);
+                logger.trace(`[WebRTC-${id}] Adding REMOTE ICE Candidate:`, candidate?.candidate || candidate);
                 return origAddIceCandidate(candidate);
             };
 
             const origSetRemoteDescription = pc.setRemoteDescription.bind(pc);
             pc.setRemoteDescription = async (desc: any) => {
-                logger.info(`[WebRTC-${id}] Set Remote Description (${desc?.type})`);
+                logger.trace(`[WebRTC-${id}] Set Remote Description (${desc?.type})`);
                 return origSetRemoteDescription(desc);
             };
 
