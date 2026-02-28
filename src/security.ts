@@ -22,7 +22,7 @@ export class SecurityService {
             "raw", enc.encode(password), { name: "PBKDF2" }, false, ["deriveKey"]
         );
         this.key = await window.crypto.subtle.deriveKey(
-            { name: "PBKDF2", salt: this.salt, iterations: 100000, hash: "SHA-256" },
+            { name: "PBKDF2", salt: this.salt as any, iterations: 100000, hash: "SHA-256" },
             keyMaterial, { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]
         );
     }
@@ -35,7 +35,7 @@ export class SecurityService {
 
         // Return JSON string of { iv, data } both base64
         return JSON.stringify({
-            iv: this.arrayBufferToBase64(iv),
+            iv: this.arrayBufferToBase64(iv.buffer),
             content: this.arrayBufferToBase64(encrypted)
         });
     }

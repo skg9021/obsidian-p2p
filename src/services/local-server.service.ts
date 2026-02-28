@@ -1,4 +1,5 @@
 import { Notice, Platform } from 'obsidian';
+import { logger } from './logger.service';
 import { P2PSettings } from '../settings';
 
 /**
@@ -27,7 +28,7 @@ export class LocalServerService {
     constructor(private settings: P2PSettings) { }
 
     private log(msg: string, ...args: any[]) {
-        if (this.settings.enableDebugLogs) console.log(`[P2P SignalingServer] ${msg}`, ...args);
+        if (this.settings.enableDebugLogs) logger.info(`[P2P SignalingServer] ${msg}`, ...args);
     }
 
     setCallbacks(onClientsUpdated: (clients: string[]) => void) {
@@ -50,7 +51,7 @@ export class LocalServerService {
             this.log(`Detected local IPs: [${results.join(', ')}]`);
             return results;
         } catch (e) {
-            console.error("[P2P SignalingServer] Failed to get local IPs", e);
+            logger.error("[P2P SignalingServer] Failed to get local IPs", e);
             return [];
         }
     }
@@ -87,7 +88,7 @@ export class LocalServerService {
                         this.log('Server Error: Address in use', e);
                         this.stopServer();
                     } else {
-                        console.error('Server Error', e);
+                        logger.error('Server Error', e);
                     }
                 });
 
@@ -206,12 +207,12 @@ export class LocalServerService {
 
             this.localWss.on('error', (err: any) => {
                 this.log('Server error:', err.message);
-                console.error('[P2P SignalingServer] Server error:', err);
+                logger.error('[P2P SignalingServer] Server error:', err);
             });
 
         } catch (e) {
             this.log('Signaling Server Start Failed:', e);
-            console.error("[P2P SignalingServer] Start Failed", e);
+            logger.error("[P2P SignalingServer] Start Failed", e);
         }
     }
 

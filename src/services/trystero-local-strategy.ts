@@ -1,4 +1,5 @@
 import { P2PSettings } from '../settings';
+import { logger } from './logger.service';
 // @ts-ignore
 import strategy from 'trystero/src/strategy.js';
 // @ts-ignore
@@ -20,7 +21,7 @@ export const joinRoom = strategy({
         return new Promise((resolve, reject) => {
             const { settings } = config;
             const url = (config as any).clientUrl || `ws://localhost:${settings.localServerPort}`;
-            console.log(`[Trystero Local] Connecting to ${url}`);
+            logger.info(`[Trystero Local] Connecting to ${url}`);
 
             const messageQueue: any[] = [];
             const activeSubscriptions = new Set<string>(); // Track active subscriptions
@@ -57,7 +58,7 @@ export const joinRoom = strategy({
                     }
                 },
                 close: () => {
-                    console.log('[Trystero Local] Manual close initiated via proxy.');
+                    logger.info('[Trystero Local] Manual close initiated via proxy.');
                     manualClose = true;
                     if (internalWs) internalWs.close();
                 },
@@ -84,14 +85,14 @@ export const joinRoom = strategy({
                     socketProxy.readyState = 0; // CONNECTING
 
                     internalWs.addEventListener('open', () => {
-                        console.log('[Trystero Local] WebSocket connected');
+                        logger.info('[Trystero Local] WebSocket connected');
                         socketProxy.readyState = 1; // OPEN
                         reconnectParams.attempts = 0;
                         reconnectParams.delay = 1000;
 
                         // 1. Resend active subscriptions (Critical for re-connect)
                         if (activeSubscriptions.size > 0) {
-                            console.log(`[Trystero Local] Restoring ${activeSubscriptions.size} subscriptions`);
+                            logger.info(`[Trystero Local] Restoring ${activeSubscriptions.size} subscriptions`);
                             const topics = Array.from(activeSubscriptions);
                             internalWs?.send(JSON.stringify({ type: 'subscribe', topics }));
                         }
@@ -113,17 +114,17 @@ export const joinRoom = strategy({
                     internalWs.addEventListener('close', () => {
                         if (manualClose) return;
                         socketProxy.readyState = 3; // CLOSED
-                        console.log('[Trystero Local] WebSocket closed. Reconnecting...');
+                        logger.info('[Trystero Local] WebSocket closed. Reconnecting...');
                         scheduleReconnect();
                     });
 
                     internalWs.addEventListener('error', (e) => {
-                        console.error('[Trystero Local] WebSocket error', e);
+                        logger.error('[Trystero Local] WebSocket error', e);
                         // Error usually leads to close
                     });
 
                 } catch (e) {
-                    console.error('[Trystero Local] Connection failed', e);
+                    logger.error('[Trystero Local] Connection failed', e);
                     scheduleReconnect();
                 }
             };
@@ -131,7 +132,7 @@ export const joinRoom = strategy({
             const scheduleReconnect = () => {
                 if (manualClose) return;
                 const timeout = Math.min(reconnectParams.delay * Math.pow(1.5, reconnectParams.attempts), reconnectParams.maxDelay);
-                console.log(`[Trystero Local] Reconnecting in ${timeout}ms...`);
+                logger.info(`[Trystero Local] Reconnecting in ${timeout}ms...`);
                 setTimeout(() => {
                     reconnectParams.attempts++;
                     connect();
@@ -193,7 +194,7 @@ export const joinRoom = strategy({
                     }
                 }
             } catch (e) {
-                console.error('[Trystero Local] Failed to parse message', e);
+                logger.error('[Trystero Local] Failed to parse message', e);
             }
         };
 
@@ -201,11 +202,11 @@ export const joinRoom = strategy({
 
         // Return unsubscribe function
         return () => {
-            console.log(`[Trystero Local] Unsubscribing from topics: ${rootTopic}, ${selfTopic}`);
+            logger.info(`[Trystero Local] Unsubscribing from topics: ${rootTopic}, ${selfTopic}`);
             send({ type: 'unsubscribe', topics: [rootTopic, selfTopic] });
             ws.removeEventListener('message', handler);
             if (typeof ws.close === 'function') {
-                console.log(`[Trystero Local] Forcing WebSocket close on unsubscribe.`);
+                logger.info(`[Trystero Local] Forcing WebSocket close on unsubscribe.`);
                 ws.close();
             }
         };

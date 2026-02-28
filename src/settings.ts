@@ -1,5 +1,6 @@
 import { App, PluginSettingTab, Setting, Notice } from 'obsidian';
 import P2PSyncPlugin from './main';
+import { logger } from './services/logger.service';
 
 export interface P2PSettings {
     deviceName: string;
@@ -54,7 +55,7 @@ export class P2PSyncSettingTab extends PluginSettingTab {
     private renderPeerList(container: HTMLElement) {
         container.empty();
         const peers = this.plugin.connectedClients;
-        console.log('[[Connected Client Rendering] Peers:', JSON.stringify(peers));
+        logger.debug('[[Connected Client Rendering] Peers:', JSON.stringify(peers));
         if (peers.length === 0) {
             container.createEl('p', { text: 'No peers connected.' });
         } else {

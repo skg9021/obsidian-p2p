@@ -1,5 +1,6 @@
 
 import { ConnectionStrategy, StrategyId } from './strategies/connection-strategy.interface';
+import { logger } from './logger.service';
 import { PeerInfo, ConnectionStatus } from './p2p-types';
 
 export class ProviderManager {
@@ -30,7 +31,7 @@ export class ProviderManager {
 
     registerStrategy(strategy: ConnectionStrategy) {
         if (this.strategies.has(strategy.id)) {
-            console.warn(`[ProviderManager] Strategy ${strategy.id} already registered. Overwriting.`);
+            logger.warn(`[ProviderManager] Strategy ${strategy.id} already registered. Overwriting.`);
             this.strategies.get(strategy.id)?.destroy();
         }
         this.strategies.set(strategy.id, strategy);
@@ -59,10 +60,10 @@ export class ProviderManager {
     async connectStrategy(id: StrategyId, roomName: string, settings?: any) {
         const strategy = this.strategies.get(id);
         if (!strategy) {
-            console.warn(`[ProviderManager] Cannot connect: Strategy ${id} not found.`);
+            logger.warn(`[ProviderManager] Cannot connect: Strategy ${id} not found.`);
             return;
         }
-        console.log(`[ProviderManager] Connecting strategy ${id} to room ${roomName}`);
+        logger.info(`[ProviderManager] Connecting strategy ${id} to room ${roomName}`);
         await strategy.connect(roomName, settings);
     }
 
@@ -71,7 +72,7 @@ export class ProviderManager {
             try {
                 await strategy.connect(roomName, settings);
             } catch (e) {
-                console.error(`[ProviderManager] Failed to connect strategy ${strategy.id}`, e);
+                logger.error(`[ProviderManager] Failed to connect strategy ${strategy.id}`, e);
             }
         }
     }

@@ -1,4 +1,5 @@
 import * as Y from 'yjs';
+import { logger } from './logger.service';
 import { App, TFile, TAbstractFile, debounce, Notice } from 'obsidian';
 // @ts-ignore - no types for this package
 import { TrysteroProvider } from '@winstonfassett/y-webrtc-trystero';
@@ -76,7 +77,7 @@ export class YjsService {
     }
 
     private log(msg: string, ...args: any[]) {
-        if (this.settings.enableDebugLogs) console.log(`[P2P Yjs] ${msg}`, ...args);
+        if (this.settings.enableDebugLogs) logger.debug(`[P2P Yjs] ${msg}`, ...args);
     }
 
     /** Set local IPs in awareness so other peers can see our IP */
@@ -230,7 +231,7 @@ export class YjsService {
                     }, 'local');
                 }
             }
-        } catch (e) { console.error("Sync Write Error", e); }
+        } catch (e) { logger.error("Sync Write Error", e); }
         finally { this.isRemoteUpdate = false; }
     }, 500, true);
 
