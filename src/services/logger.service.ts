@@ -47,7 +47,23 @@ export const logger = pino({
             delete rest.pid;
             delete rest.hostname;
 
-            if (Object.keys(rest).length > 0) {
+            // Pino sometimes places trailing array arguments into numeric keys '0', '1', etc.
+            // Or within a nested array. Let's dynamically extract any other keys.
+            const extraArgs = [];
+            for (const key of Object.keys(rest)) {
+                if (!isNaN(Number(key))) {
+                    extraArgs.push(rest[key]);
+                    delete rest[key]; // safely move it out
+                }
+            }
+
+            const hasRest = Object.keys(rest).length > 0;
+
+            if (extraArgs.length > 0 && hasRest) {
+                console[consoleMethod](`[${timeStr}] [${levelStr}] ${msg}`, rest, ...extraArgs);
+            } else if (extraArgs.length > 0) {
+                console[consoleMethod](`[${timeStr}] [${levelStr}] ${msg}`, ...extraArgs);
+            } else if (hasRest) {
                 console[consoleMethod](`[${timeStr}] [${levelStr}] ${msg}`, rest);
             } else {
                 console[consoleMethod](`[${timeStr}] [${levelStr}] ${msg}`);
