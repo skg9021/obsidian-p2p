@@ -130,7 +130,7 @@ export class YTrysteroProvider extends ObservableV2<YTrysteroProviderEvents> {
     // ═══════════════════════════════════════════════════════════
 
     private setupActions(): void {
-        const [sendYjs, listenYjs] = this.trystero.makeAction<Uint8Array>('yjs');
+        const [sendYjs, listenYjs] = this.trystero.makeAction<Uint8Array>('docdata');
         this.sendYjs = sendYjs;
 
         listenYjs((data: Uint8Array, peerId: string) => {
