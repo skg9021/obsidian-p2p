@@ -3,8 +3,7 @@ import * as Y from 'yjs';
 import * as awarenessProtocol from 'y-protocols/awareness';
 import { ConnectionStrategy, StrategyId } from './connection-strategy.interface';
 import { PeerInfo, ConnectionStatus } from '../p2p-types';
-// @ts-ignore
-import { TrysteroProvider } from '@winstonfassett/y-webrtc-trystero';
+import { YTrysteroProvider } from '../y-trystero';
 // @ts-ignore
 import { joinRoom, closeAllClients } from 'trystero/mqtt';
 import { logger } from '../logger.service';
@@ -80,26 +79,26 @@ export class MqttStrategy implements ConnectionStrategy {
         this.emitStatus('connecting');
 
         try {
-            this.provider = new TrysteroProvider(
+            // Create the Trystero room FIRST, then inject it into the provider.
+            // This ensures makeAction() is called before any peers can join.
+            const trysteroRoom = joinRoom({
+                appId: 'obsidian-p2p-sync',
+                password: password || undefined,
+                ...(relayUrls && relayUrls.length > 0 ? { relayUrls } : {}),
+                ...(mqttCredentials?.username ? {
+                    mqttUsername: mqttCredentials.username,
+                    mqttPassword: mqttCredentials.password,
+                } : {}),
+            }, fullRoomName);
+
+            this.provider = new YTrysteroProvider(
                 fullRoomName,
                 this.doc,
                 {
+                    room: trysteroRoom,
                     awareness: this.awareness,
                     filterBcConns: false,
                     disableBc: true,
-                    joinRoom: (config: any, roomId: string) => {
-                        return joinRoom({
-                            ...config,
-                            appId: config.appId || 'obsidian-p2p-sync',
-                            password: password || undefined,
-                            ...(relayUrls && relayUrls.length > 0 ? { relayUrls } : {}),
-                            ...(mqttCredentials?.username ? {
-                                mqttUsername: mqttCredentials.username,
-                                mqttPassword: mqttCredentials.password,
-                            } : {}),
-                        }, roomId);
-                    },
-                    password: password || undefined,
                 }
             );
 
@@ -121,7 +120,7 @@ export class MqttStrategy implements ConnectionStrategy {
             });
 
             this.provider.on('peers', (event: any) => {
-                // If we get any peer events, we are definitely connected to the signaling server
+                // If we get any peer events, we are definitely connected
                 this.emitStatus('connected');
 
                 if (!this.provider?.room) return;
@@ -139,13 +138,6 @@ export class MqttStrategy implements ConnectionStrategy {
                     }, 5000);
                 }
             });
-
-            // Fallback: Trystero's native connection events
-            if (this.provider.trystero) {
-                this.provider.trystero.onPeerJoin(() => {
-                    this.emitStatus('connected');
-                });
-            }
 
             // Periodic fallback: only ADDS peers, never removes.
             this.recomputeInterval = setInterval(() => {

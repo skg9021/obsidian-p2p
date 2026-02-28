@@ -5,8 +5,7 @@ import { ConnectionStrategy, StrategyId } from './connection-strategy.interface'
 import { Platform } from 'obsidian';
 import { PeerInfo, ConnectionStatus } from '../p2p-types';
 import { P2PSettings } from '../../settings'; // Needed for local strategy joinRoom config
-// @ts-ignore
-import { TrysteroProvider } from '@winstonfassett/y-webrtc-trystero';
+import { YTrysteroProvider } from '../y-trystero';
 import { joinRoom as joinLocalRoom } from '../trystero-local-strategy';
 import { logger } from '../logger.service';
 
@@ -128,19 +127,19 @@ export class LocalStrategy implements ConnectionStrategy {
         this.emitStatus('connecting');
 
         try {
-            this.provider = new TrysteroProvider(
+            // Create the Trystero room FIRST, then inject it into the provider.
+            const trysteroRoom = joinLocalRoom({
+                appId: 'obsidian-p2p-local',
+                password: password || undefined,
+                clientUrl: signalingUrl,
+                settings: settings,
+            }, fullRoomName);
+
+            this.provider = new YTrysteroProvider(
                 fullRoomName,
                 this.doc,
                 {
-                    appId: 'obsidian-p2p-local',
-                    password: password || undefined,
-                    joinRoom: (config: any, roomId: string) => {
-                        return joinLocalRoom({
-                            ...config,
-                            clientUrl: signalingUrl,
-                            settings: settings
-                        }, roomId);
-                    },
+                    room: trysteroRoom,
                     awareness: this.awareness,
                     filterBcConns: false,
                     disableBc: true,
@@ -182,13 +181,6 @@ export class LocalStrategy implements ConnectionStrategy {
                     }, 5000);
                 }
             });
-
-            // Fallback: Trystero's native connection events
-            if (this.provider.trystero) {
-                this.provider.trystero.onPeerJoin(() => {
-                    this.emitStatus('connected');
-                });
-            }
 
             // Periodic fallback: if trysteroConns has active entries but myPeers is empty,
             // origin-based tracking missed the event — scan all awareness states.

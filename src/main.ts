@@ -29,89 +29,91 @@ export default class P2PSyncPlugin extends Plugin {
     saveSettingsDebounced = debounce(this.saveSettings.bind(this), 1000, true);
 
     async onload() {
-        // --- TEMPORARY WEBRTC DEBUGGING ---
-        const wrapDataChannel = (dc: RTCDataChannel, pcId: string, label: string) => {
-            logger.trace(`[WebRTC-${pcId}] DataChannel "${label}" created, readyState=${dc.readyState}`);
-            dc.addEventListener('open', () => {
-                logger.trace(`[WebRTC-${pcId}] DataChannel "${label}" OPENED`);
-            });
-            dc.addEventListener('close', () => {
-                logger.trace(`[WebRTC-${pcId}] DataChannel "${label}" CLOSED`);
-            });
-            dc.addEventListener('error', (e: any) => {
-                logger.trace(`[WebRTC-${pcId}] DataChannel "${label}" ERROR:`, e.error?.message || e);
-            });
-            dc.addEventListener('message', (e: any) => {
-                const size = typeof e.data === 'string' ? e.data.length : e.data?.byteLength || 0;
-                logger.trace(`[WebRTC-${pcId}] DataChannel "${label}" RECV ${size} bytes`);
-            });
-            const origSend = dc.send.bind(dc);
-            dc.send = (data: any) => {
-                const size = typeof data === 'string' ? data.length : data?.byteLength || 0;
-                logger.trace(`[WebRTC-${pcId}] DataChannel "${label}" SEND ${size} bytes`);
-                return origSend(data);
-            };
-        };
-
-        const OrigPeerConnection = window.RTCPeerConnection;
-        window.RTCPeerConnection = function (...args: any[]) {
-            // @ts-ignore
-            const pc = new OrigPeerConnection(...args);
-            const id = Math.random().toString(36).substring(2, 6);
-
-            logger.trace(`[WebRTC-${id}] Created PC with config:`, args[0]);
-
-            // Intercept createDataChannel (initiator side)
-            const origCreateDC = pc.createDataChannel.bind(pc);
-            pc.createDataChannel = (label: string, ...dcArgs: any[]) => {
-                const dc = origCreateDC(label, ...dcArgs);
-                wrapDataChannel(dc, id, label);
-                return dc;
-            };
-
-            // Intercept ondatachannel (receiver side)
-            pc.addEventListener('datachannel', (e: any) => {
-                logger.trace(`[WebRTC-${id}] Remote DataChannel received: "${e.channel.label}"`);
-                wrapDataChannel(e.channel, id, e.channel.label);
-            });
-
-            pc.addEventListener('icecandidate', (e: any) => {
-                if (e.candidate) {
-                    logger.trace(`[WebRTC-${id}] Gathered LOCAL ICE Candidate:`, e.candidate.candidate);
-                } else {
-                    logger.trace(`[WebRTC-${id}] Finished gathering ICE candidates.`);
-                }
-            });
-
-            pc.addEventListener('iceconnectionstatechange', () => {
-                logger.trace(`[WebRTC-${id}] ICE Connection State:`, pc.iceConnectionState);
-            });
-
-            pc.addEventListener('connectionstatechange', () => {
-                logger.trace(`[WebRTC-${id}] Connection State:`, pc.connectionState);
-            });
-
-            const origAddIceCandidate = pc.addIceCandidate.bind(pc);
-            pc.addIceCandidate = async (candidate: any) => {
-                logger.trace(`[WebRTC-${id}] Adding REMOTE ICE Candidate:`, candidate?.candidate || candidate);
-                return origAddIceCandidate(candidate);
-            };
-
-            const origSetRemoteDescription = pc.setRemoteDescription.bind(pc);
-            pc.setRemoteDescription = async (desc: any) => {
-                logger.trace(`[WebRTC-${id}] Set Remote Description (${desc?.type})`);
-                return origSetRemoteDescription(desc);
-            };
-
-            return pc;
-        } as any;
-        // ----------------------------------
-
         await this.loadSettings();
 
         // Initialize Logger
         updateLoggerSettings(this.settings);
         logger.info('Plugin loading...');
+
+        // --- WEBRTC DEBUGGING (gated behind enableDebugLogs) ---
+        if (this.settings.enableDebugLogs) {
+            const wrapDataChannel = (dc: RTCDataChannel, pcId: string, label: string) => {
+                logger.trace(`[WebRTC-${pcId}] DataChannel "${label}" created, readyState=${dc.readyState}`);
+                dc.addEventListener('open', () => {
+                    logger.trace(`[WebRTC-${pcId}] DataChannel "${label}" OPENED`);
+                });
+                dc.addEventListener('close', () => {
+                    logger.trace(`[WebRTC-${pcId}] DataChannel "${label}" CLOSED`);
+                });
+                dc.addEventListener('error', (e: any) => {
+                    logger.trace(`[WebRTC-${pcId}] DataChannel "${label}" ERROR:`, e.error?.message || e);
+                });
+                dc.addEventListener('message', (e: any) => {
+                    const size = typeof e.data === 'string' ? e.data.length : e.data?.byteLength || 0;
+                    logger.trace(`[WebRTC-${pcId}] DataChannel "${label}" RECV ${size} bytes`);
+                });
+                const origSend = dc.send.bind(dc);
+                dc.send = (data: any) => {
+                    const size = typeof data === 'string' ? data.length : data?.byteLength || 0;
+                    logger.trace(`[WebRTC-${pcId}] DataChannel "${label}" SEND ${size} bytes`);
+                    return origSend(data);
+                };
+            };
+
+            const OrigPeerConnection = window.RTCPeerConnection;
+            window.RTCPeerConnection = function (...args: any[]) {
+                // @ts-ignore
+                const pc = new OrigPeerConnection(...args);
+                const id = Math.random().toString(36).substring(2, 6);
+
+                logger.trace(`[WebRTC-${id}] Created PC with config:`, args[0]);
+
+                // Intercept createDataChannel (initiator side)
+                const origCreateDC = pc.createDataChannel.bind(pc);
+                pc.createDataChannel = (label: string, ...dcArgs: any[]) => {
+                    const dc = origCreateDC(label, ...dcArgs);
+                    wrapDataChannel(dc, id, label);
+                    return dc;
+                };
+
+                // Intercept ondatachannel (receiver side)
+                pc.addEventListener('datachannel', (e: any) => {
+                    logger.trace(`[WebRTC-${id}] Remote DataChannel received: "${e.channel.label}"`);
+                    wrapDataChannel(e.channel, id, e.channel.label);
+                });
+
+                pc.addEventListener('icecandidate', (e: any) => {
+                    if (e.candidate) {
+                        logger.trace(`[WebRTC-${id}] Gathered LOCAL ICE Candidate:`, e.candidate.candidate);
+                    } else {
+                        logger.trace(`[WebRTC-${id}] Finished gathering ICE candidates.`);
+                    }
+                });
+
+                pc.addEventListener('iceconnectionstatechange', () => {
+                    logger.trace(`[WebRTC-${id}] ICE Connection State:`, pc.iceConnectionState);
+                });
+
+                pc.addEventListener('connectionstatechange', () => {
+                    logger.trace(`[WebRTC-${id}] Connection State:`, pc.connectionState);
+                });
+
+                const origAddIceCandidate = pc.addIceCandidate.bind(pc);
+                pc.addIceCandidate = async (candidate: any) => {
+                    logger.trace(`[WebRTC-${id}] Adding REMOTE ICE Candidate:`, candidate?.candidate || candidate);
+                    return origAddIceCandidate(candidate);
+                };
+
+                const origSetRemoteDescription = pc.setRemoteDescription.bind(pc);
+                pc.setRemoteDescription = async (desc: any) => {
+                    logger.trace(`[WebRTC-${id}] Set Remote Description (${desc?.type})`);
+                    return origSetRemoteDescription(desc);
+                };
+
+                return pc;
+            } as any;
+        } // end debug logging gate
+        // ----------------------------------
 
         // Initialize Security
         this.security = new SecurityService(this.settings.secretKey);

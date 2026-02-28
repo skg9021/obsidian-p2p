@@ -1,15 +1,8 @@
 import * as Y from 'yjs';
 import { logger } from './logger.service';
 import { App, TFile, TAbstractFile, debounce, Notice } from 'obsidian';
-// @ts-ignore - no types for this package
-import { TrysteroProvider } from '@winstonfassett/y-webrtc-trystero';
-// @ts-ignore
-import { joinRoom, closeAllClients } from 'trystero/mqtt';
-// @ts-ignore
-import { WebrtcProvider } from 'y-webrtc';
 import * as awarenessProtocol from 'y-protocols/awareness';
 import { P2PSettings } from '../settings';
-import { joinRoom as joinLocalRoom } from './trystero-local-strategy';
 import { ProviderManager } from './provider-manager.service';
 import { PeerInfo } from './p2p-types';
 
