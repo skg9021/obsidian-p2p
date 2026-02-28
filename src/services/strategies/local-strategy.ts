@@ -45,62 +45,14 @@ export class LocalStrategy implements ConnectionStrategy {
         // It connects if either server is enabled (host) OR client is enabled + address set.
 
         let shouldConnect = false;
-        let signalingUrl = '';
+        let signalingUrl = settings.discoveredLocalAddress;
 
-        // Host check uses Platform.isMobile (imported from obsidian) — see line below
-
-        // Host Mode
-        // We need to know if we successfully started the server? 
-        // Actually, LocalStrategy connects to a signaling url. 
-        // If we are Host, we connect to localhost.
-        // If we are Client, we connect to remote.
-        // If BOTH, we connect to BOTH? Trystero doesn't support connecting to multiple signaling servers in one instance easily 
-        // without multiple instances. 
-        // BUT Trystero Local uses ONE socket.
-        // Our 'LocalStrategy' wraps 'TrysteroLocalProvider', which wraps a websocket.
-
-        // Wait, the previous logic in main.ts distinguished between 'Host' implementation connecting to localhost 
-        // and 'Client' implementation connecting to remote.
-        // And it created ONE 'local' strategy? 
-        // No, main.ts registered ONE 'local' strategy.
-        // If both were enabled, it would call connectStrategy TWICE? 
-        // PROVIDER MANAGER: "connectStrategy" gets the strategy and calls connect.
-        // If you call it twice, it might disconnect the first one?
-        // Let's check LocalStrategy implementation.
-
-        // LocalStrategy holds ONE 'provider'. 
-        // If we call connect() again, it overwrites 'this.provider'.
-        // So we can only have ONE active LocalStrategy connection.
-        // This means we can either be a Host (connected to localhost) OR a Client (connected to remote).
-        // Can we be both? 
-        // If I am Host, I am the server. I connect to myself.
-        // If I am Client, I connect to Host.
-        // Usually you are one or the other in this model (or if you are Host, you don't need to be Client to someone else usually, unless mesh).
-        // The settings imply:
-        // "Enable Local Server" -> I am Host.
-        // "Enable Local Client" -> I connect to Host.
-
-        // If I am Host, I connect to `ws://localhost:port`.
-        // If I am Client, I connect to `ws://remote:port`.
-
-        // If both are enabled? Valid use case? Maybe acting as relay? 
-        // For now, let's prioritize Host if enabled (we are the server), otherwise Client.
-
-        if (settings.enableLocalServer && !Platform.isMobile) {
-            signalingUrl = `ws://localhost:${settings.localServerPort}`;
-            shouldConnect = true;
-        } else if (settings.enableLocalClient && settings.localServerAddress) {
-            signalingUrl = settings.localServerAddress;
+        if (settings.enableLocalSync && signalingUrl) {
             shouldConnect = true;
         }
 
         if (!shouldConnect) {
             // logger.info('[LocalStrategy] Disabled or invalid settings. Skipping.');
-            return;
-        }
-
-        if (!signalingUrl) {
-            logger.error('[LocalStrategy] Missing signalingUrl in connect options');
             return;
         }
 

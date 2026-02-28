@@ -20,7 +20,7 @@ export const joinRoom = strategy({
     init: (config: { appId: string, settings: P2PSettings }) => {
         return new Promise((resolve, reject) => {
             const { settings } = config;
-            const url = (config as any).clientUrl || `ws://localhost:${settings.localServerPort}`;
+            const url = (config as any).clientUrl || settings.discoveredLocalAddress || `ws://localhost:${settings.localSyncPort || 8080}`;
             logger.info(`[Trystero Local] Connecting to ${url}`);
 
             const messageQueue: any[] = [];

@@ -1,6 +1,7 @@
-import { App, PluginSettingTab, Setting, Notice } from 'obsidian';
+import { App, PluginSettingTab, Setting, Notice, Platform } from 'obsidian';
 import P2PSyncPlugin from './main';
 import { logger } from './services/logger.service';
+import { QRCodeModal, QRScannerModal } from './ui/qr-modals';
 
 export interface P2PSettings {
     deviceName: string;
@@ -9,10 +10,9 @@ export interface P2PSettings {
     mqttUsername: string;
     mqttPassword: string;
     iceServersJSON: string;
-    enableLocalServer: boolean;
-    localServerPort: number;
-    enableLocalClient: boolean;
-    localServerAddress: string;
+    enableLocalSync: boolean;
+    localSyncPort: number;
+    discoveredLocalAddress: string | null;
     enableDebugLogs: boolean;
     debugLevel: 'info' | 'debug' | 'trace'; // Added logging level
     enableMqttDiscovery: boolean;
@@ -26,10 +26,9 @@ export const DEFAULT_SETTINGS: P2PSettings = {
     mqttUsername: '',
     mqttPassword: '',
     iceServersJSON: '[{"urls":"stun:stun.l.google.com:19302"}]',
-    enableLocalServer: false,
-    localServerPort: 8080,
-    enableLocalClient: false,
-    localServerAddress: 'ws://localhost:8080',
+    enableLocalSync: false,
+    localSyncPort: 8080,
+    discoveredLocalAddress: null,
     enableDebugLogs: false,
     debugLevel: 'info', // Default level
     enableMqttDiscovery: false,
@@ -136,85 +135,54 @@ export class P2PSyncSettingTab extends PluginSettingTab {
 
         // ─── Local Network ───────────────────────────────────────
         containerEl.createEl('h3', { text: 'Local Network' });
+        // ─── Local Network ───────────────────────────────────────
+        containerEl.createEl('h3', { text: 'Local Network' });
 
-        // Host Mode
         new Setting(containerEl)
-            .setName('Enable Host Mode')
-            .setDesc('Start a local WebSocket server for other devices on your LAN')
+            .setName('Enable Local Network Sync')
+            .setDesc('Automatically discover and sync with devices on the same Wi-Fi network')
             .addToggle(toggle => toggle
-                .setValue(this.plugin.settings.enableLocalServer)
+                .setValue(this.plugin.settings.enableLocalSync)
                 .onChange(async (value) => {
-                    this.plugin.settings.enableLocalServer = value;
+                    this.plugin.settings.enableLocalSync = value;
                     await this.plugin.saveSettingsDebounced();
                     this.plugin.reloadLocalStrategy();
                     this.display();
                 }));
 
-        if (this.plugin.settings.enableLocalServer) {
+        if (this.plugin.settings.enableLocalSync) {
             new Setting(containerEl)
-                .setName('Server Name')
-                .setDesc('This is the name clients will see when they connect')
-                .addText(text => text
-                    .setValue(this.plugin.settings.deviceName)
-                    .setDisabled(true));
-
-            new Setting(containerEl)
-                .setName('Host Port')
-                .setDesc('Port for the local server')
+                .setName('Sync Port')
+                .setDesc('Port to use for local network connections')
                 .addText(text => text
                     .setPlaceholder('8080')
-                    .setValue(String(this.plugin.settings.localServerPort))
+                    .setValue(String(this.plugin.settings.localSyncPort))
                     .onChange(async (value) => {
-                        this.plugin.settings.localServerPort = Number(value);
+                        this.plugin.settings.localSyncPort = Number(value) || 8080;
                         await this.plugin.saveSettingsDebounced();
                         this.plugin.reloadLocalStrategy();
                     }));
 
-            const ipSetting = new Setting(containerEl)
-                .setName('Server IP Addresses')
-                .setDesc('Fetching...');
-
-            this.plugin.getLocalIPs().then(ips => {
-                const ipText = ips.length > 0 ? ips.join(', ') : 'Unknown (Check Console)';
-                ipSetting.setDesc(`Use this IP to connect other devices: ${ipText}`);
-            });
-
-            new Setting(containerEl)
-                .setName('Restart Server')
-                .setDesc('Stop and restart the local WebSocket server')
-                .addButton(button => button
-                    .setButtonText('Restart')
-                    .onClick(() => {
-                        this.plugin.reloadLocalStrategy();
-                        new Notice('Local Server Restarted');
-                    }));
-        }
-
-        // Client Mode
-        new Setting(containerEl)
-            .setName('Enable Local Client')
-            .setDesc('Connect to a host on the local network for P2P sync')
-            .addToggle(toggle => toggle
-                .setValue(this.plugin.settings.enableLocalClient)
-                .onChange(async (value) => {
-                    this.plugin.settings.enableLocalClient = value;
-                    await this.plugin.saveSettings(); // Save immediately
-                    await this.plugin.reloadLocalStrategy(); // Connect immediately
-                    this.display();
-                }));
-
-        if (this.plugin.settings.enableLocalClient) {
-            new Setting(containerEl)
-                .setName('Host Address')
-                .setDesc('WebSocket address of the host (e.g., ws://192.168.1.5:8080)')
-                .addText(text => text
-                    .setPlaceholder('ws://localhost:8080')
-                    .setValue(this.plugin.settings.localServerAddress)
-                    .onChange(async (value) => {
-                        this.plugin.settings.localServerAddress = value;
-                        await this.plugin.saveSettingsDebounced();
-                        this.plugin.reloadLocalStrategy();
-                    }));
+            if (!Platform.isMobile) {
+                new Setting(containerEl)
+                    .setName('Show Connection QR Code')
+                    .setDesc('Display a QR code for mobile devices to quickly connect to this desktop')
+                    .addButton(button => button
+                        .setButtonText('Show QR')
+                        .onClick(() => {
+                            new QRCodeModal(this.app, this.plugin).open();
+                        }));
+            } else {
+                new Setting(containerEl)
+                    .setName('Scan Connection QR Code')
+                    .setDesc('Scan a desktop QR code to instantly connect')
+                    .addButton(button => button
+                        .setButtonText('Scan QR')
+                        .setCta()
+                        .onClick(() => {
+                            new QRScannerModal(this.app, this.plugin).open();
+                        }));
+            }
         }
 
         // ─── Internet (MQTT) ─────────────────────────────────────
