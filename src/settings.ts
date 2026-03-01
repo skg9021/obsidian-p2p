@@ -135,8 +135,6 @@ export class P2PSyncSettingTab extends PluginSettingTab {
 
         // ─── Local Network ───────────────────────────────────────
         containerEl.createEl('h3', { text: 'Local Network' });
-        // ─── Local Network ───────────────────────────────────────
-        containerEl.createEl('h3', { text: 'Local Network' });
 
         new Setting(containerEl)
             .setName('Enable Local Network Sync')
@@ -151,16 +149,34 @@ export class P2PSyncSettingTab extends PluginSettingTab {
                 }));
 
         if (this.plugin.settings.enableLocalSync) {
+            if (!Platform.isMobile) {
+                new Setting(containerEl)
+                    .setName('Sync Port')
+                    .setDesc('Port to use for local network connections')
+                    .addText(text => text
+                        .setPlaceholder('8080')
+                        .setValue(String(this.plugin.settings.localSyncPort))
+                        .onChange(async (value) => {
+                            this.plugin.settings.localSyncPort = Number(value) || 8080;
+                            await this.plugin.saveSettingsDebounced();
+                            this.plugin.reloadLocalStrategy();
+                        }));
+            }
+
+            if (Platform.isMobile) {
+                const noteEl = containerEl.createEl('p', { cls: 'setting-item-description' });
+                noteEl.style.color = 'var(--text-warning)';
+                noteEl.style.marginBottom = '1.5em';
+                noteEl.innerHTML = '<strong>Note:</strong> Automatic LAN Discovery is not supported on mobile. Please use <strong>Connect Manually</strong> or <strong>Scan QR</strong> to join a Desktop Host.';
+            }
+
             new Setting(containerEl)
-                .setName('Sync Port')
-                .setDesc('Port to use for local network connections')
-                .addText(text => text
-                    .setPlaceholder('8080')
-                    .setValue(String(this.plugin.settings.localSyncPort))
-                    .onChange(async (value) => {
-                        this.plugin.settings.localSyncPort = Number(value) || 8080;
-                        await this.plugin.saveSettingsDebounced();
-                        this.plugin.reloadLocalStrategy();
+                .setName('Connect Manually')
+                .setDesc('Manually connect to a host using an IP and Port')
+                .addButton(button => button
+                    .setButtonText('Enter IP')
+                    .onClick(() => {
+                        new ManualConnectModal(this.app, this.plugin).open();
                     }));
 
             if (!Platform.isMobile) {
@@ -183,15 +199,6 @@ export class P2PSyncSettingTab extends PluginSettingTab {
                             new QRScannerModal(this.app, this.plugin).open();
                         }));
             }
-
-            new Setting(containerEl)
-                .setName('Connect Manually')
-                .setDesc('Manually connect to a host using an IP and Port')
-                .addButton(button => button
-                    .setButtonText('Enter IP')
-                    .onClick(() => {
-                        new ManualConnectModal(this.app, this.plugin).open();
-                    }));
         }
 
         // ─── Internet (MQTT) ─────────────────────────────────────
