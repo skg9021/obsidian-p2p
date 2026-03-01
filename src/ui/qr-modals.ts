@@ -86,8 +86,8 @@ export class QRScannerModal extends Modal {
             await this.html5Qrcode.start(
                 { facingMode: 'environment' },
                 { fps: 10, qrbox: { width: 250, height: 250 } },
-                (decodedText) => this.handleScanSuccess(decodedText),
-                (errorMessage) => {
+                (decodedText: string) => this.handleScanSuccess(decodedText),
+                (errorMessage: string) => {
                     // Ignore regular scan failures
                 }
             );

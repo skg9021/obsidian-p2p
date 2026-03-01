@@ -79,7 +79,10 @@ export class LocalNetworkHostElectionService {
         try {
             this.plugin.settings.localSyncPort = this.plugin.settings.localSyncPort || 8080;
             const targetPort = this.plugin.settings.localSyncPort;
-            this.plugin.settings.discoveredLocalAddress = `ws://localhost:${targetPort}`;
+
+            const ips = await this.plugin.localServerService.getLocalIPs();
+            const ipDisplay = ips.length > 0 ? ips[0] : 'localhost';
+            this.plugin.settings.discoveredLocalAddress = `ws://${ipDisplay}:${targetPort}`;
 
             await this.plugin.localServerService.startServer();
             logger.info(`Local signaling server started on port ${targetPort}`);
