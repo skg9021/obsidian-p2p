@@ -1,7 +1,7 @@
 import { App, PluginSettingTab, Setting, Notice, Platform } from 'obsidian';
 import P2PSyncPlugin from './main';
 import { logger } from './services/logger.service';
-import { QRCodeModal, QRScannerModal } from './ui/qr-modals';
+import { QRCodeModal, QRScannerModal, ManualConnectModal } from './ui/qr-modals';
 
 export interface P2PSettings {
     deviceName: string;
@@ -181,6 +181,15 @@ export class P2PSyncSettingTab extends PluginSettingTab {
                         .setCta()
                         .onClick(() => {
                             new QRScannerModal(this.app, this.plugin).open();
+                        }));
+
+                new Setting(containerEl)
+                    .setName('Connect Manually')
+                    .setDesc('Manually connect to a host using an IP and Port')
+                    .addButton(button => button
+                        .setButtonText('Enter IP')
+                        .onClick(() => {
+                            new ManualConnectModal(this.app, this.plugin).open();
                         }));
             }
         }

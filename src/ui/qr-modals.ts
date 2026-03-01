@@ -173,3 +173,70 @@ export class QRScannerModal extends Modal {
         this.contentEl.empty();
     }
 }
+
+export class ManualConnectModal extends Modal {
+    plugin: P2PSyncPlugin;
+    hostAddress: string = '';
+
+    constructor(app: App, plugin: P2PSyncPlugin) {
+        super(app);
+        this.plugin = plugin;
+    }
+
+    onOpen() {
+        const { contentEl } = this;
+        contentEl.empty();
+
+        contentEl.createEl('h2', { text: 'Connect Manually' });
+        contentEl.createEl('p', { text: 'Enter the Host IP and Port (e.g., 192.168.1.100:8080) to connect.' });
+
+        new Setting(contentEl)
+            .setName('Host Address')
+            .setDesc('IP Address and Port')
+            .addText(text => text
+                .setPlaceholder('192.168.1.100:8080')
+                .setValue(this.hostAddress)
+                .onChange(value => {
+                    this.hostAddress = value;
+                }));
+
+        new Setting(contentEl)
+            .addButton(btn => btn
+                .setButtonText('Cancel')
+                .onClick(() => {
+                    this.close();
+                }))
+            .addButton(btn => btn
+                .setButtonText('Connect')
+                .setCta()
+                .onClick(async () => {
+                    if (!this.hostAddress) {
+                        new Notice('Please enter a Host Address');
+                        return;
+                    }
+
+                    try {
+                        let url = this.hostAddress.trim();
+                        // Auto format if they forgot ws://
+                        if (!url.startsWith('ws://') && !url.startsWith('wss://')) {
+                            url = `ws://${url}`;
+                        }
+
+                        this.plugin.settings.discoveredLocalAddress = url;
+                        await this.plugin.saveSettingsDebounced();
+
+                        new Notice('Connecting to Host...');
+                        const roomName = await this.plugin.getRoomName();
+                        this.plugin.localNetworkHostElection.connectLocalClient(url, roomName);
+                        this.close();
+                    } catch (e) {
+                        logger.error('Failed to connect manually', e);
+                        new Notice('Connection setup failed.');
+                    }
+                }));
+    }
+
+    onClose() {
+        this.contentEl.empty();
+    }
+}
