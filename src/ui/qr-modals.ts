@@ -187,8 +187,13 @@ export class ManualConnectModal extends Modal {
         const { contentEl } = this;
         contentEl.empty();
 
-        contentEl.createEl('h2', { text: 'Connect Manually' });
-        contentEl.createEl('p', { text: 'Enter the Host IP and Port (e.g., 192.168.1.100:8080) to connect.' });
+        contentEl.createEl('h2', { text: 'Connect Manually (Overrides Auto-Discovery)' });
+
+        const noteEl = contentEl.createEl('p', { cls: 'mod-warning' });
+        noteEl.innerHTML = '<strong>Note:</strong> Using this option will bypass the default LAN auto-discovery. Only this manual connection to the specified Host will be active.';
+
+        contentEl.createEl('p', { text: 'Please enter the Host IP address and Server Port below.' });
+        contentEl.createEl('p', { text: 'Example: 192.168.1.100:8080', cls: 'mod-muted' });
 
         new Setting(contentEl)
             .setName('Host Address')

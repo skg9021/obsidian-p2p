@@ -17,6 +17,9 @@ export class LocalNetworkHostElectionService {
         this.lanDiscoveryService.on('discover', (peerInfo: DiscoveryPeerInfo) => {
             this.handleDiscoveredHost(peerInfo);
         });
+        this.lanDiscoveryService.on('lose', (peerInfo: DiscoveryPeerInfo) => {
+            this.handleLostHost(peerInfo);
+        });
     }
 
     public stop() {
@@ -165,6 +168,18 @@ export class LocalNetworkHostElectionService {
                 this.plugin.yjsService.providerManager.disconnectStrategy('local');
                 this.connectToDiscoveredHost(host, roomName);
             }
+        }
+    }
+
+    private async handleLostHost(host: DiscoveryPeerInfo) {
+        if (!this.plugin.settings.enableLocalSync) return;
+
+        const hostUrl = `ws://${host.ip}:${host.port}`;
+        // If we were connected to this host as a client, trigger re-election
+        if (!this.isLocalHost && this.plugin.settings.discoveredLocalAddress === hostUrl) {
+            logger.info(`Host ${host.name} (${hostUrl}) lost UDP heartbeat. Triggering re-election...`);
+            this.plugin.yjsService.providerManager.disconnectStrategy('local');
+            this.startElection();
         }
     }
 }

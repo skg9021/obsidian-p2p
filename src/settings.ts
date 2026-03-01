@@ -182,16 +182,16 @@ export class P2PSyncSettingTab extends PluginSettingTab {
                         .onClick(() => {
                             new QRScannerModal(this.app, this.plugin).open();
                         }));
-
-                new Setting(containerEl)
-                    .setName('Connect Manually')
-                    .setDesc('Manually connect to a host using an IP and Port')
-                    .addButton(button => button
-                        .setButtonText('Enter IP')
-                        .onClick(() => {
-                            new ManualConnectModal(this.app, this.plugin).open();
-                        }));
             }
+
+            new Setting(containerEl)
+                .setName('Connect Manually')
+                .setDesc('Manually connect to a host using an IP and Port')
+                .addButton(button => button
+                    .setButtonText('Enter IP')
+                    .onClick(() => {
+                        new ManualConnectModal(this.app, this.plugin).open();
+                    }));
         }
 
         // ─── Internet (MQTT) ─────────────────────────────────────
