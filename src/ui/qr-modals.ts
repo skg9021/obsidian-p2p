@@ -77,6 +77,38 @@ export class QRScannerModal extends Modal {
         readerDiv.style.width = '100%';
         readerDiv.style.minHeight = '300px';
 
+        const fallbackContainer = contentEl.createDiv({ cls: 'qr-fallback-container' });
+        fallbackContainer.style.marginTop = '20px';
+        fallbackContainer.style.textAlign = 'center';
+
+        fallbackContainer.createEl('p', { text: 'Camera permission denied? Take a picture instead:', cls: 'mod-muted' });
+
+        const fileInput = fallbackContainer.createEl('input', {
+            type: 'file',
+            attr: {
+                accept: 'image/*',
+                capture: 'environment'
+            }
+        });
+        fileInput.style.maxWidth = '100%';
+
+        fileInput.addEventListener('change', async (e: Event) => {
+            const target = e.target as HTMLInputElement;
+            if (target.files && target.files.length > 0) {
+                const file = target.files[0];
+                try {
+                    if (!this.html5Qrcode) {
+                        this.html5Qrcode = new Html5Qrcode(this.scannerId);
+                    }
+                    const decodedText = await this.html5Qrcode.scanFile(file, true);
+                    this.handleScanSuccess(decodedText);
+                } catch (err) {
+                    logger.error('Failed to parse QR from image file', err);
+                    new Notice('Could not find a valid QR code in the image.');
+                }
+            }
+        });
+
         this.startScanner();
     }
 
